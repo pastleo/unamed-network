@@ -1,0 +1,8 @@
+
+//export const whichExampleToRun = 'connManager';
+//export const whichExampleToRun = 'fullConn';
+export const whichExampleToRun = 'client';
+
+export const defaultFirstAddr = 'ws://localhost:8000';
+
+export const baseIceServers = [{urls: 'stun:stun.l.google.com:19302'}];

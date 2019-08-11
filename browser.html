@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title id='title'>unnamed web client</title>
+  <style>
+    .peer-container {
+      padding: 5px;
+      margin: 5px;
+      border-style: solid;
+      border-width: 1px;
+      border: #3266c1 solid 1px;
+    }
+    .peer-container h3, .peer-container h4 {
+      margin-top: 0;
+      margin-bottom: 0;
+    }
+    .peer-container .via-container:not(.shown) {
+      display: none;
+    }
+    .peer-container .second-ctl-line:not(.shown) {
+      display: none;
+    }
+    .peer-container .second-ctl-line {
+      margin-top: 5px;
+    }
+    .input-line {
+      display: flex;
+      padding: 10px;
+    }
+    .input-line input {
+      flex: 1;
+    }
+    .peer-container .stress-show:not(.shown) {
+      display: none;
+    }
+    #group-join-box:not(.shown) {
+      display: none;
+    }
+    .group {
+      border: #32c149 solid 1px;
+      margin: 10px;
+      padding: 10px;
+      width: 47.86%;
+      display: inline-block;
+      box-sizing: border-box;
+    }
+    .group > h3 {
+      margin: 0;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>addr: <span id='my-addr'></span></h1>
+  <div class='input-line'>
+    <input type='text' id='connect-name'></input><button id='connect'>connect</button>
+  </div>
+  <div id='peers'>
+  </div>
+  <div id='input-box' class='input-line'>
+    <input type='text' id='message-input' placeholder='type some message'></input><button id='message-broadcast'>broadcast</button>
+  </div>
+  <div id='messages-box'>
+  </div>
+  <div id='group-join-box' class='input-line'>
+    <input type='text' id='group-input' placeholder='type a group name'></input><button id='join-btn'>join</button>
+  </div>
+  <div id='group-box'>
+  </div>
+
+  <template id='peer-template'>
+    <div class='peer-container'>
+      <h3><span class='name'></span></h3>
+      <h4 class='via-container'>via: <span class='via'></span></h4>
+      <div>
+        <button class='ping'>ping</button>
+        <button class='query-peers'>queryPeers and connect</button>
+        <button class='disconnect'>disconnect</button>
+      </div>
+      <div class='second-ctl-line connect-ctl'>
+        <select class='connect-select'><option value=''>choose a peer to connect</option></select>
+      </div>
+    </div>
+  </template>
+  <template id='message-line-template'>
+    <p><span class='peer-name'></span>: <span class='message-content'></span></p>
+  </template>
+  <template id='group-template'>
+    <div class='group'>
+      <h3><a class='group-name' target='_blank'></a></h3>
+      <div class='group-neighbor-box'>
+      </div>
+      <div class='group-msg-box'>
+      </div>
+      <div class='input-line'>
+        <input type='text' class='group-message-input' placeholder='type some message'></input>
+        <button class='group-message-send'>send</button>
+        <button class='group-leave'>leave</button>
+      </div>
+    </div>
+  </template>
+
+  <script type="module" src="browser.js"></script>
+</body>
+</html>
