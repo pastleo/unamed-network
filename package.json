@@ -18,8 +18,8 @@
     "ws": "^7.1.1"
   },
   "scripts": {
-    "start": "node --experimental-modules node.js",
-    "serve": "http-server"
+    "example": "node --experimental-modules ./example/node.js",
+    "example-serve": "http-server ./example"
   },
   "devDependencies": {
     "http-server": "^0.11.1"

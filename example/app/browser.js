@@ -5,7 +5,7 @@ import BrowserConnProvider from './lib/connProvider/browser.js';
 
 import { whichExampleToRun, defaultFirstAddr, baseIceServers } from './config.js';
 
-import examples from './examples/index.js';
+import App from './index.js';
 
 const myAddr = `rtc://${randomStr()}`;
 
@@ -17,12 +17,10 @@ window.cm = new ConnManager(myAddr, browserConnProvider);
 console.log(`=> window.cm : connManager`);
 
 document.addEventListener("DOMContentLoaded", async () => {
-  const methods = examples[whichExampleToRun](window.cm, {
-    defaultFirstAddr, document, localStorage,
-  });
-  Object.keys(methods).forEach(methodName => {
+  const app = new App(window.cm, { defaultFirstAddr, document, localStorage });
+  Object.keys(app).forEach(methodName => {
     Object.defineProperty(window, methodName, {
-      get: methods[methodName],
+      get: () => app[methodName],
     });
     console.log(`=> window.${methodName}`);
   });

@@ -1,6 +1,6 @@
-import Client from '../lib/client.js';
+import Client from './lib/client.js';
 
-function init(connManager, { defaultFirstAddr, document, localStorage }) {
+function App(connManager, { defaultFirstAddr, document, localStorage }) {
   const client = new Client(connManager, localStorage);
 
   connManager.on('ready', ({ addr }) => {
@@ -154,16 +154,16 @@ function init(connManager, { defaultFirstAddr, document, localStorage }) {
   })();
 
   return {
-    client: () => client,
-    know: () => addr => { client.know(addr); },
-    forget: () => addr => { client.forget(addr); },
-    join: () => group => { client.join(group); },
-    hasGroup: () => group => { console.log(group, client.hasGroup(group)); },
-    leave: () => group => { client.leave(group); },
-    send: () => (group, message) => {
+    client: client,
+    know: addr => { client.know(addr); },
+    forget: addr => { client.forget(addr); },
+    join: group => { client.join(group); },
+    hasGroup: group => { console.log(group, client.hasGroup(group)); },
+    leave: group => { client.leave(group); },
+    send: (group, message) => {
       client.broadcast(group, 'message', { from: myAddr, message })
     }
   }
 }
 
-export default init;
+export default App;

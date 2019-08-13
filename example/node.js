@@ -3,15 +3,15 @@ import WebSocket from 'ws';
 import nodeLocalStorage from 'node-localstorage';
 const { LocalStorage } = nodeLocalStorage;
 
-import { setWsClass } from './lib/conn/ws.js';
+import { setWsClass } from './app/lib/conn/ws.js';
 setWsClass(WebSocket);
 
-import ConnManager from './lib/connManager.js';
-import WssConnProvider from './lib/connProvider/wss.js';
+import ConnManager from './app/lib/connManager.js';
+import WssConnProvider from './app/lib/connProvider/wss.js';
 
-import { whichExampleToRun, defaultFirstAddr } from './config.js';
+import { whichExampleToRun, defaultFirstAddr } from './app/config.js';
 
-import examples from './examples/index.js';
+import App from './app/index.js';
 
 let [myAddr, storage, port] = process.argv.slice(2);
 if (!myAddr) {
@@ -37,12 +37,10 @@ global.cm = new ConnManager(myAddr, wssConnProvider);
 console.log(`=> global.cm : connManager`);
 
 (async () => {
-  const methods = examples[whichExampleToRun](global.cm, {
-    defaultFirstAddr, localStorage,
-  });
-  Object.keys(methods).forEach(methodName => {
+  const app = new App(global.cm, { defaultFirstAddr, localStorage });
+  Object.keys(app).forEach(methodName => {
     Object.defineProperty(global, methodName, {
-      get: methods[methodName],
+      get: () => app[methodName],
     });
     console.log(`=> global.${methodName}`);
   })
