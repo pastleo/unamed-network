@@ -3,7 +3,7 @@ import { randomStr } from './lib/utils.js';
 import ConnManager from './lib/connManager.js';
 import BrowserConnProvider from './lib/connProvider/browser.js';
 
-import { whichExampleToRun, defaultFirstAddr, baseIceServers } from './config.js';
+import { defaultFirstAddr, baseIceServers } from './config.js';
 
 import App from './index.js';
 

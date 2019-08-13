@@ -9,7 +9,7 @@ setWsClass(WebSocket);
 import ConnManager from './app/lib/connManager.js';
 import WssConnProvider from './app/lib/connProvider/wss.js';
 
-import { whichExampleToRun, defaultFirstAddr } from './app/config.js';
+import { defaultFirstAddr } from './app/config.js';
 
 import App from './app/index.js';
 
@@ -20,7 +20,7 @@ if (!myAddr) {
   myAddr = defaultFirstAddr.slice(0);
 }
 if (!port) {
-  port = (new URL(myAddr)).port;
+  port = process.env.PORT || (new URL(myAddr)).port || 8000;
   console.log(`using port from myAddr: ${port}`);
 }
 if (!storage) {
