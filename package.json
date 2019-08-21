@@ -19,7 +19,7 @@
   },
   "scripts": {
     "example": "node --experimental-modules ./example/node.js",
-    "example-serve": "http-server ./example"
+    "example-serve": "http-server ./example -c-1"
   },
   "devDependencies": {
     "http-server": "^0.11.1"

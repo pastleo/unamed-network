@@ -1,0 +1,41 @@
+#new-group {
+  color: #28a745;
+  cursor: pointer;
+}
+
+.group-neighbor-box {
+  margin-right: 4px;
+  color: #44a58f;
+}
+
+@media screen and (min-width: 992px) {
+  .msg-container {
+    max-width: 40%;
+  }
+}
+.msg-container {
+}
+.msg-container .group-msgs {
+  padding: .5rem;
+  height: calc(100vh - 20rem);
+  overflow-y: auto;
+}
+.msg-container .group-msgs .msg {
+  margin-bottom: 1em;
+}
+.msg-container .group-msgs .msg p {
+  margin-bottom: 0;
+}
+.msg-container .group-msgs .msg .author {
+  font-weight: bold;
+  margin-right: 6px;
+}
+.msg-container .group-msgs .msg .from {
+  color: #7b7b7b;
+  font-size: 0.8rem; 
+}
+
+.media-content {
+  max-height: calc(100vh - 20rem);
+  overflow-y: auto;
+}

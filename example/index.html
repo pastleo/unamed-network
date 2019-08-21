@@ -3,104 +3,117 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title id='title'>unnamed web client</title>
-  <style>
-    .peer-container {
-      padding: 5px;
-      margin: 5px;
-      border-style: solid;
-      border-width: 1px;
-      border: #3266c1 solid 1px;
-    }
-    .peer-container h3, .peer-container h4 {
-      margin-top: 0;
-      margin-bottom: 0;
-    }
-    .peer-container .via-container:not(.shown) {
-      display: none;
-    }
-    .peer-container .second-ctl-line:not(.shown) {
-      display: none;
-    }
-    .peer-container .second-ctl-line {
-      margin-top: 5px;
-    }
-    .input-line {
-      display: flex;
-      padding: 10px;
-    }
-    .input-line input {
-      flex: 1;
-    }
-    .peer-container .stress-show:not(.shown) {
-      display: none;
-    }
-    #group-join-box:not(.shown) {
-      display: none;
-    }
-    .group {
-      border: #32c149 solid 1px;
-      margin: 10px;
-      padding: 10px;
-      width: 47.86%;
-      display: inline-block;
-      box-sizing: border-box;
-    }
-    .group > h3 {
-      margin: 0;
-      text-align: center;
-    }
-  </style>
+  <title>Chatrooms - an unnamed-network example</title>
+  <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+  <link href="./app/styles.css" rel="stylesheet">
 </head>
 <body>
-  <h1>addr: <span id='my-addr'></span></h1>
-  <div class='input-line'>
-    <input type='text' id='connect-name'></input><button id='connect'>connect</button>
-  </div>
-  <div id='peers'>
-  </div>
-  <div id='input-box' class='input-line'>
-    <input type='text' id='message-input' placeholder='type some message'></input><button id='message-broadcast'>broadcast</button>
-  </div>
-  <div id='messages-box'>
-  </div>
-  <div id='group-join-box' class='input-line'>
-    <input type='text' id='group-input' placeholder='type a group name'></input><button id='join-btn'>join</button>
-  </div>
-  <div id='group-box'>
-  </div>
 
-  <template id='peer-template'>
-    <div class='peer-container'>
-      <h3><span class='name'></span></h3>
-      <h4 class='via-container'>via: <span class='via'></span></h4>
+  <div class="container">
+    <div class="input-group input-group-lg mt-3 mb-4">
+      <div class="input-group-prepend">
+        <span class="input-group-text" id="name-input-label">My Name</span>
+      </div>
+      <input id="name-input" type="text" class="form-control" aria-label="My Name" aria-describedby="name-input-label">
+      <div class="input-group-append">
+        <span id="my-addr" class="input-group-text text-secondary">myAddr</span>
+      </div>
+    </div>
+
+    <ul id="group-tabs" class="nav nav-tabs">
+      <li id="root-tab" class="nav-item">
+        <a class="group-link nav-link active" href="#">Welcome</a>
+      </li>
+      <li id="new-group" class="nav-item">
+        <a class="nav-link">+</a>
+      </li>
+    </ul>
+    <template id="group-tab-template">
+      <li class="nav-item">
+        <a class="group-link nav-link" href="#"></a>
+      </li>
+    </template>
+
+    <div id="group-contents" class="tab-contents">
+      <div id="root-group-content" class="tab-pane p-3 fade show active" role="tabpanel">
+        <div class="alert alert-light flex-fill" role="alert">
+          there are <span class="neighbor-cnt">0</span> neighbors...
+          <span class="group-neighbor-box"></span>
+        </div>
+        <div class="input-group mb-3">
+          <input id="knowing-input" type="text" class="form-control" placeholder="addr" aria-label="addr">
+          <div class="input-group-append">
+            <button id="know-btn" class="btn btn-primary" type="button">Know</button>
+            <button id="forget-btn" class="btn btn-secondary" type="button">Forget</button>
+          </div>
+        </div>
+        <div class="input-group mb-3">
+          <input id="join-input" type="text" class="form-control" placeholder="group id" aria-label="addr">
+          <div class="input-group-append">
+            <button id="join-btn" class="btn btn-secondary" type="button">Join</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <template id="group-content-template">
+      <div class="tab-pane p-3 fade" role="tabpanel">
+        <div class="d-flex">
+          <div class="alert alert-light flex-fill" role="alert">
+            there are <span class="neighbor-cnt">0</span> neighbors...
+            <span class="group-neighbor-box"></span>
+          </div>
+          <div>
+            <button class="leave-group-btn btn btn-danger" type="button">Leave</button>
+          </div>
+        </div>
+        <div class="row justify-content-center">
+          <div class="col-lg py-3 d-flex flex-column justify-content-center">
+            <div class="media-box">
+              <div class="media-content mb-3">
+              </div>
+              <div class="input-group">
+                <input type="text" class="media-input form-control" placeholder="Youtube or Imgur URL" aria-label="media input">
+                <div class="input-group-append">
+                  <button class="btn btn-primary media-btn" type="button">Play</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg py-3 border-left msg-container">
+            <div class="group-msgs">
+            </div>
+            <div class="input-group">
+              <input type="text" class="msg-input form-control" placeholder="type some message" aria-label="message input">
+              <div class="input-group-append">
+                <button class="send-msg-btn btn btn-primary" type="button">Send</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+    <template id='neighbor-template'>
+      <span>
+        <span class="neighbor-name"></span>
+      </span>
+    </template>
+    <template id="msg-template">
+      <div class="msg">
+        <p><span class="author"></span><span class="from"></span></p>
+        <p class="content"></p>
+      </div>
+    </template>
+    <template id="media-imgur-template">
       <div>
-        <button class='ping'>ping</button>
-        <button class='query-peers'>queryPeers and connect</button>
-        <button class='disconnect'>disconnect</button>
+        <img class="imgur-image img-fluid mx-auto d-block" src="" />
       </div>
-      <div class='second-ctl-line connect-ctl'>
-        <select class='connect-select'><option value=''>choose a peer to connect</option></select>
+    </template>
+    <template id="media-youtube-template">
+      <div class="embed-responsive embed-responsive-16by9">
+        <div class="youtube-player"></div>
       </div>
-    </div>
-  </template>
-  <template id='message-line-template'>
-    <p><span class='peer-name'></span>: <span class='message-content'></span></p>
-  </template>
-  <template id='group-template'>
-    <div class='group'>
-      <h3><a class='group-name' target='_blank'></a></h3>
-      <div class='group-neighbor-box'>
-      </div>
-      <div class='group-msg-box'>
-      </div>
-      <div class='input-line'>
-        <input type='text' class='group-message-input' placeholder='type some message'></input>
-        <button class='group-message-send'>send</button>
-        <button class='group-leave'>leave</button>
-      </div>
-    </div>
-  </template>
+    </template>
 
   <script type="module" src="./app/browser.js"></script>
 </body>
