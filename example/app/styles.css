@@ -1,6 +1,33 @@
+@media screen and (min-width: 992px) {
+  .my-name-input-group .input-group-text {
+    padding: .5rem 1rem;
+    font-size: 1.25rem;
+    line-height: 1.5;
+    border-radius: .3rem;
+  }
+  .my-name-input-group > .form-control:not(textarea) {
+    height: calc(1.5em + 1rem + 2px);
+  }
+  .my-name-input-group > .form-control {
+    padding: .5rem 1rem;
+    font-size: 1.25rem;
+    line-height: 1.5;
+    border-radius: .3rem;
+  }
+}
+
 #new-group {
   color: #28a745;
   cursor: pointer;
+}
+
+.neighbor-info {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  margin: 8px;
+  font-size: 0.9rem;
+  color: #525252;
 }
 
 .group-neighbor-box {
@@ -20,6 +47,11 @@
   height: calc(100vh - 20rem);
   overflow-y: auto;
 }
+@media screen and (min-width: 992px) {
+  .msg-container .group-msgs {
+    height: calc(100vh - 18rem);
+  }
+}
 .msg-container .group-msgs .msg {
   margin-bottom: 1em;
 }
@@ -35,7 +67,12 @@
   font-size: 0.8rem; 
 }
 
-.media-content {
-  max-height: calc(100vh - 20rem);
+.media-box {
+  max-height: calc(100vh - 24.5rem);
   overflow-y: auto;
+}
+@media screen and (min-width: 992px) {
+  .media-box {
+    max-height: calc(100vh - 20rem);
+  }
 }

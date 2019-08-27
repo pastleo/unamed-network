@@ -3,6 +3,7 @@ import { randomStr, EventDispatcher } from './lib/utils.js';
 
 const myNameKey = 'myName';
 const mediaKeys = ['url', 'playing', 'time'];
+const youtubeLinkRegExp = /^.*((youtu.be\/)|(v\/)|(\/u\/\w\/)|(embed\/)|(watch\?))\??v?=?([^#\&\?]*).*/;
 
 function App(connManager, { defaultFirstAddr, document, localStorage }) {
   const client = new Client(connManager, localStorage);
@@ -136,9 +137,17 @@ function App(connManager, { defaultFirstAddr, document, localStorage }) {
     };
 
     const joinInput = document.getElementById('join-input');
-    document.getElementById('join-btn').onclick = () => joinInput.value && joinGroupDom(joinInput.value);
+    document.getElementById('join-btn').onclick = () => joinInput.value && joinGroupDom(parseGroupId(joinInput.value));
     joinInput.onkeyup = ({ keyCode }) => {
-      if (keyCode === 13 && joinInput.value) { joinGroupDom(joinInput.value); }
+      if (keyCode === 13 && joinInput.value) { joinGroupDom(parseGroupId(joinInput.value)); }
+    }
+
+    function parseGroupId(value) {
+      try {
+        const url = new URL(value);
+        return url.hash.slice(1)
+      } catch (_) {}
+      return value;
     }
 
     const newGroupTab = document.getElementById('new-group');
@@ -146,10 +155,9 @@ function App(connManager, { defaultFirstAddr, document, localStorage }) {
     groupDoms['/'][0].querySelector('.group-link').onclick = () => showGroup('/');
     newGroupTab.onclick = () => joinGroupDom(randomStr());
 
-    client.on('ready', ({ group }) => {
-      if (window.location.hash.length > 1) {
-        joinGroupDom(window.location.hash.slice(1));
-      }
+    client.on('ready', () => {
+      const group = parseGroupId(window.location.href);
+      if (group) joinGroupDom(group);
     });
 
     client.on('left', ({ group }) => {
@@ -227,6 +235,7 @@ function App(connManager, { defaultFirstAddr, document, localStorage }) {
         groupNameLink.onclick = () => showGroup(group);
 
         contentDom.querySelector('.leave-group-btn').onclick = () => client.leave(group);
+        contentDom.querySelector('.share-group-btn').onclick = () => onShareClicked(group);
 
         const msgInput = contentDom.querySelector('.msg-input');
         msgInput.onkeyup = ({ keyCode }) => {
@@ -257,6 +266,27 @@ function App(connManager, { defaultFirstAddr, document, localStorage }) {
     function updateMyNameDom() {
       document.title = `[${myName}] Chatrooms - an unnamed-network example`;
       nameInput.value = myName;
+    }
+
+    function onShareClicked(group) {
+      const [_, contentDom] = (groupDoms[group] || []);
+      const url = new URL(window.location.href);
+      url.hash = `#${group}`;
+      if (navigator.share) {
+        navigator.share({ url: url.toString() });
+      } else {
+        const mediaInput = contentDom.querySelector('.media-input')
+        const shareBtn = contentDom.querySelector('.share-group-btn');
+        const valueKeep = mediaInput.value;
+        mediaInput.value = url.toString();
+        mediaInput.select();
+        mediaInput.setSelectionRange(0, 99999);
+        document.execCommand("copy");
+        shareBtn.textContent = 'Link';
+        setTimeout(() => { shareBtn.textContent = 'Copied'; }, 1000);
+        setTimeout(() => { shareBtn.textContent = 'Share'; }, 2500);
+        mediaInput.value = valueKeep;
+      }
     }
 
     function onSentClicked(group, msgInput) {
@@ -302,11 +332,13 @@ function App(connManager, { defaultFirstAddr, document, localStorage }) {
         dom.querySelector('.imgur-image').src = url;
         const mediaContentDom = groupContentDom.querySelector('.media-content');
         mediaContentDom.appendChild(dom);
+        groupContentDom.querySelector('.media-input').value = url;
       } else {
         const youtubeId = parseYoutubeId(url);
         if (youtubeId) {
           clearMediaDom(group);
           newYoutubePlayer(group, youtubeId);
+          groupContentDom.querySelector('.media-input').value = url;
         }
       }
     }
@@ -314,11 +346,8 @@ function App(connManager, { defaultFirstAddr, document, localStorage }) {
     const youtubes = {};
 
     function parseYoutubeId(url) {
-      const urlObj = new URL(url);
-      if (urlObj.hostname !== 'www.youtube.com') return;
-      const videoIdPair = urlObj.search.slice(1).split('&').map(x => x.split('=')).filter(([k, _]) => k === 'v');
-      if (videoIdPair.length === 0) return;
-      return videoIdPair[0][1];
+      const match = url.match(youtubeLinkRegExp);
+      return (match && match[7].length == 11) ? match[7] : false;
     }
 
     function newYoutubePlayer(group, youtubeId) {

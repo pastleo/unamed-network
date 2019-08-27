@@ -10,8 +10,8 @@
 <body>
 
   <div class="container">
-    <div class="input-group input-group-lg mt-3 mb-4">
-      <div class="input-group-prepend">
+    <div class="my-name-input-group input-group mt-3 mb-4">
+      <div class="input-group-prepend d-none d-lg-flex">
         <span class="input-group-text" id="name-input-label">My Name</span>
       </div>
       <input id="name-input" type="text" class="form-control" aria-label="My Name" aria-describedby="name-input-label">
@@ -36,8 +36,8 @@
 
     <div id="group-contents" class="tab-contents">
       <div id="root-group-content" class="tab-pane p-3 fade show active" role="tabpanel">
-        <div class="alert alert-light flex-fill" role="alert">
-          there are <span class="neighbor-cnt">0</span> neighbors...
+        <div class="neighbor-info mb-3">
+          <span class="d-none d-lg-inline">there are</span> <span class="neighbor-cnt">0</span> neighbors...
           <span class="group-neighbor-box"></span>
         </div>
         <div class="input-group mb-3">
@@ -48,10 +48,13 @@
           </div>
         </div>
         <div class="input-group mb-3">
-          <input id="join-input" type="text" class="form-control" placeholder="group id" aria-label="addr">
+          <input id="join-input" type="text" class="form-control" placeholder="URL or Group id" aria-label="addr">
           <div class="input-group-append">
             <button id="join-btn" class="btn btn-secondary" type="button">Join</button>
           </div>
+        </div>
+        <div class="embed-responsive embed-responsive-16by9">
+          <iframe width="560" height="315" src="https://www.youtube.com/embed/kogpQkkBlGY" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
         </div>
       </div>
     </div>
@@ -59,13 +62,15 @@
     <template id="group-content-template">
       <div class="tab-pane p-3 fade" role="tabpanel">
         <div class="d-flex">
-          <div class="alert alert-light flex-fill" role="alert">
-            there are <span class="neighbor-cnt">0</span> neighbors...
+          <div class="neighbor-info flex-fill">
+            <span class="d-none d-lg-inline">there are</span> <span class="neighbor-cnt">0</span> neighbors...
             <span class="group-neighbor-box"></span>
           </div>
-          <div>
+          <div class="btn-group">
+            <button class="share-group-btn btn btn-success" type="button">Share</button>
             <button class="leave-group-btn btn btn-danger" type="button">Leave</button>
           </div>
+
         </div>
         <div class="row justify-content-center">
           <div class="col-lg py-3 d-flex flex-column justify-content-center">
