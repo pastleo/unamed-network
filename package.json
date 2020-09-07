@@ -19,7 +19,8 @@
   },
   "scripts": {
     "example": "node --experimental-modules ./example/node.js",
-    "example-serve": "http-server ./example -c-1"
+    "example-serve": "http-server ./example -c-1",
+    "heroku-postbuild": "./example/prepare.sh && cp ./example/app/config.js.example ./example/app/config.js"
   },
   "devDependencies": {
     "http-server": "^0.11.1"

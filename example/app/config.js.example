@@ -1,5 +1,6 @@
 
 // defaultFirstAddr: first known addr to connect, basically your wss node address
-export const defaultFirstAddr = 'ws://localhost:8000';
+const defaultFirstAddrFromEnv = process && process.env.DEFAULT_FIRST_ADDR
+export const defaultFirstAddr = defaultFirstAddrFromEnv || 'ws://localhost:8000';
 
 export const baseIceServers = [{urls: 'stun:stun.l.google.com:19302'}];
