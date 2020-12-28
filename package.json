@@ -1,0 +1,27 @@
+{
+  "name": "unnamed-network",
+  "version": "0.0.1",
+  "description": "unnamed network core lib",
+  "type": "module",
+  "exports": {
+    "./connManager.js": "./lib/connManager.js",
+    "./client.js": "./lib/client.js",
+    "./connProvider/browser.js": "./lib/connProvider/browser.js",
+    "./connProvider/wss.js": "./lib/connProvider/wss.js",
+    "./conn/rtc.js": "./lib/conn/rtc.js",
+    "./conn/ws.js": "./lib/conn/ws.js",
+    "./utils.js": "./lib/utils.js"
+  },
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "author": "PastLeo",
+  "license": "GPL-3.0"
+}
