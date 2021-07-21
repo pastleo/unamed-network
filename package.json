@@ -1,0 +1,37 @@
+{
+  "name": "unnamed-network",
+  "version": "0.0.2",
+  "description": "unnamed network",
+  "type": "module",
+  "exports": {
+    "./connManager.js": "./lib/connManager.js",
+    "./client.js": "./lib/client.js",
+    "./connProvider/browser.js": "./lib/connProvider/browser.js",
+    "./connProvider/wss.js": "./lib/connProvider/wss.js",
+    "./conn/rtc.js": "./lib/conn/rtc.js",
+    "./conn/ws.js": "./lib/conn/ws.js",
+    "./utils.js": "./lib/utils.js"
+  },
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "bundle": "webpack --config webpack.config.js",
+    "start": "webpack serve --open --config webpack.config.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "author": "PastLeo",
+  "license": "GPL-3.0",
+  "devDependencies": {
+    "html-webpack-plugin": "^5.3.2",
+    "ts-loader": "^9.2.3",
+    "typescript": "^4.3.5",
+    "webpack": "^5.45.1",
+    "webpack-cli": "^4.7.2",
+    "webpack-dev-server": "^3.11.2"
+  }
+}
