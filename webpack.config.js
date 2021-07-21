@@ -2,11 +2,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import HtmlWebpackPlugin from 'html-webpack-plugin';
 
-export default {
-  mode: process.env.production ? 'production' : 'development',
-  entry: {
-    demo: './src/demo.ts',
-  },
+const mode = process.env.NODE_ENV ? 'production' : 'development';
+const target = process.env.TARGET || 'browser';
+
+const pathTo = target => path.resolve(path.dirname(fileURLToPath(import.meta.url)), target);
+
+const webpackSharedConfig = {
+  mode,
   module: {
     rules: [
       {
@@ -18,21 +20,41 @@ export default {
   },
   resolve: {
     extensions: ['.tsx', '.ts', '.js'],
-  },
-  plugins: [
-    new HtmlWebpackPlugin({
-      title: 'unnamed-network demo',
-    }),
-  ],
-  output: {
-    filename: '[name].[contenthash].js',
-    path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'dist'),
-    clean: true,
+    alias: {
+      'unnamed-network': pathTo('src'),
+    }
   },
   devtool: 'inline-source-map',
-  devServer: {
-    watchOptions: {
-      ignored: /node_modules/,
+};
+
+const webpackConfigs = {
+  browser: {
+    ...webpackSharedConfig,
+    entry: { 'demo-browser': './src/demo/browser.ts' },
+    plugins: [
+      new HtmlWebpackPlugin({
+        title: 'unnamed-network demo',
+      }),
+    ],
+    output: {
+      filename: '[name].[contenthash].js',
+      path: pathTo('dist'),
+    },
+    devtool: 'inline-source-map',
+    devServer: {
+      watchOptions: {
+        ignored: /node_modules/,
+      },
+    },
+  },
+  node: {
+    ...webpackSharedConfig,
+    entry: { 'demo-node': './src/demo/node.ts' },
+    output: {
+      filename: '[name].js',
+      path: pathTo('dist'),
     },
   },
 };
+
+export default webpackConfigs[target];

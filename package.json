@@ -3,22 +3,16 @@
   "version": "0.0.2",
   "description": "unnamed network",
   "type": "module",
-  "exports": {
-    "./connManager.js": "./lib/connManager.js",
-    "./client.js": "./lib/client.js",
-    "./connProvider/browser.js": "./lib/connProvider/browser.js",
-    "./connProvider/wss.js": "./lib/connProvider/wss.js",
-    "./conn/rtc.js": "./lib/conn/rtc.js",
-    "./conn/ws.js": "./lib/conn/ws.js",
-    "./utils.js": "./lib/utils.js"
-  },
+  "exports": {},
   "directories": {
     "lib": "lib"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "bundle": "webpack --config webpack.config.js",
-    "start": "webpack serve --open --config webpack.config.js"
+    "browser-agent": "webpack serve --open --config webpack.config.js",
+    "node-agent": "TARGET=node webpack --config webpack.config.js && node ./dist/demo-node.js",
+    "bundle-browser": "webpack --config webpack.config.js",
+    "bundle-node": "TARGET=node webpack --config webpack.config.js"
   },
   "repository": {
     "type": "git",
