@@ -1,3 +1,6 @@
+import EventTarget, { CustomEvent } from './utils/event-target';
+import ConnManager from './conn-manager/base';
+
 interface ConfigMandatory {
   id: string,
 }
@@ -8,13 +11,33 @@ interface ConfigOptional {
 type Config = ConfigMandatory & ConfigOptional;
 type ArgConfig = ConfigMandatory & Partial<ConfigOptional>;
 
-export default class Agent {
+class HelloEvent extends CustomEvent {
+  type = 'hello';
+  name: string;
+  constructor(name: string) {
+    super();
+    this.name = name;
+  }
+}
+class BelloEvent extends HelloEvent {
+  type = 'bello';
+}
+interface EventHandlersEventMap {
+  "hello": HelloEvent;
+  "bello": BelloEvent;
+}
+
+export default class Agent extends EventTarget {
+  connManager: ConnManager;
   private config: Config
-  constructor(config: ArgConfig) {
+
+  constructor(connManager: ConnManager, config: ArgConfig) {
+    super();
     this.config = {
       routeTtl: 10,
       ...config,
     };
+    this.connManager = connManager;
   }
 
   showConfig() {
@@ -23,9 +46,21 @@ export default class Agent {
 
   hello() {
     this.greet(this.config.id);
+
+    setTimeout(() => {
+      this.dispatchEvent(new BelloEvent(this.config.id));
+    }, 1000);
+    setTimeout(() => {
+      this.dispatchEvent(new HelloEvent(this.config.id));
+    }, 1500);
   }
 
   private greet(id: string) {
     console.log(`hello, id: ${id}`);
   }
+
+  addEventListener<K extends keyof EventHandlersEventMap>(type: K, listener: (this: GlobalEventHandlers, ev: EventHandlersEventMap[K]) => any): void {
+    super.addEventListener(type, listener);
+  }
 }
+

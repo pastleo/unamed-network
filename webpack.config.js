@@ -3,12 +3,12 @@ import { fileURLToPath } from 'url';
 import HtmlWebpackPlugin from 'html-webpack-plugin';
 
 const mode = process.env.NODE_ENV ? 'production' : 'development';
-const target = process.env.TARGET || 'browser';
+const target = process.env.TARGET || 'web';
 
 const pathTo = target => path.resolve(path.dirname(fileURLToPath(import.meta.url)), target);
 
 const webpackSharedConfig = {
-  mode,
+  mode, target,
   module: {
     rules: [
       {
@@ -28,7 +28,7 @@ const webpackSharedConfig = {
 };
 
 const webpackConfigs = {
-  browser: {
+  web: {
     ...webpackSharedConfig,
     entry: { 'demo-browser': './src/demo/browser.ts' },
     plugins: [
@@ -51,9 +51,13 @@ const webpackConfigs = {
     ...webpackSharedConfig,
     entry: { 'demo-node': './src/demo/node.ts' },
     output: {
-      filename: '[name].js',
+      filename: '[name].cjs',
       path: pathTo('dist'),
     },
+    externals: [{
+      'utf-8-validate': 'commonjs utf-8-validate',
+      bufferutil: 'commonjs bufferutil',
+    }],
   },
 };
 
