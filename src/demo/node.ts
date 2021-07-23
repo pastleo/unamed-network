@@ -1,13 +1,17 @@
-import Agent from 'unnamed-network/agent';
+//import Agent from 'unnamed-network/agent';
 import WssConnManager from 'unnamed-network/conn-manager/wss';
+import repl from 'repl';
 
 console.log('starting ...');
 
 const connManager = new WssConnManager({ port: 8081 });
-const agent = new Agent(connManager, { id: 'node' });
+(global as any).cm = connManager;
 
-connManager.start();
+(async () => {
+  await connManager.start('ws://localhost:8081');
+  connManager.addEventListener('new-conn', event => {
+    console.log('new-conn', event.detail.addr);
+  });
 
-agent.addEventListener('hello', event => console.log(event.type, event.name));
-agent.hello();
-agent.showConfig();
+  repl.start({ prompt: '> ' });
+})();

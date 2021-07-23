@@ -1,36 +1,60 @@
 import EventTarget, { CustomEvent } from '../utils/event-target';
 import Conn from '../conn/base';
+import WsConn from '../conn/ws';
 
 interface RequestToConnEventDetail {
   addr: string;
 }
-export class RequestToConnEvent extends CustomEvent {
-  readonly detail: RequestToConnEventDetail;
+export class RequestToConnEvent extends CustomEvent<RequestToConnEventDetail> {
+  type = 'request-to-conn'
+  reject() {
+    this.defaultPrevented = false;
+  }
 }
+
 interface NewConnEventDetail {
   addr: string;
   conn: Conn;
 }
-export class NewConnEvent extends CustomEvent {
-  readonly detail: NewConnEventDetail;
+export class NewConnEvent extends CustomEvent<NewConnEventDetail> {
+  type = 'new-conn'
 }
 
-interface ConnManagerEventHandlersEventMap {
+interface ConnManagerEventMap {
   'request-to-conn': RequestToConnEvent
   'new-conn': NewConnEvent
 }
 
-abstract class ConnManager extends EventTarget {
+abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
+  protected conns: Conn[] = [];
+  myAddr: string;
 
-  abstract start(): Promise<void>;
-  abstract connect(addr: string, viaAddr: string): Promise<void>;
+  async start(myAddr: string): Promise<void> {
+    this.myAddr = myAddr;
+  }
 
-  addEventListener<K extends keyof ConnManagerEventHandlersEventMap>(type: K, listener: (this: GlobalEventHandlers, ev: ConnManagerEventHandlersEventMap[K]) => any): void {
-    super.addEventListener(type, listener);
+  connect(addr: string, viaAddr: string): Promise<void> {
+    const { protocol } = (new URL(addr));
+
+    switch (protocol) {
+      case 'ws:':
+      case 'wss:':
+        return this.connectWs(addr);
+      case 'rtc:':
+        return this.connectRtc(addr, viaAddr);
+      default:
+        throw new Error(`Unknown protocol: ${protocol}, addr: ${addr}`);
+    }
   }
-  removeEventListener<K extends keyof ConnManagerEventHandlersEventMap>(type: K, listener: (this: GlobalEventHandlers, ev: ConnManagerEventHandlersEventMap[K]) => any): void {
-    super.removeEventListener(type, listener);
+
+  async connectWs(addr: string): Promise<void> {
+    const conn = new WsConn();
+    await conn.startLink({ myAddr: this.myAddr, addr });
+    this.conns.push(conn);
+    this.dispatchEvent(new NewConnEvent({ addr, conn }));
   }
+
+  abstract connectRtc(addr: string, viaAddr: string): Promise<void>;
 }
 
 export default ConnManager;

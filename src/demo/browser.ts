@@ -1,15 +1,18 @@
-import Agent from 'unnamed-network/agent';
+//import Agent from 'unnamed-network/agent';
 import BrowserConnManager from 'unnamed-network/conn-manager/browser';
-import WsConn from 'unnamed-network/conn/ws';
 
 const connManager = new BrowserConnManager();
 
+(window as any).cm = connManager;
+
 console.log('works ...');
-const agent = new Agent(connManager, { id: 'browser', routeTtl: 20 });
 
-agent.addEventListener('bello', event => console.log(event.type, event.name));
-agent.hello();
-agent.showConfig();
+(async () => {
+  await connManager.start('rtc://pastleo');
+  connManager.addEventListener('new-conn', event => {
+    console.log('new-conn', event.detail.addr);
+  });
+  await connManager.connect('ws://localhost:8081', '');
+  console.log('done');
+})();
 
-const conn = new WsConn();
-conn.startLink({ addr: 'ws://localhost:8081' })

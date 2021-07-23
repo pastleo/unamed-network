@@ -11,7 +11,7 @@ interface ConfigOptional {
 type Config = ConfigMandatory & ConfigOptional;
 type ArgConfig = ConfigMandatory & Partial<ConfigOptional>;
 
-class HelloEvent extends CustomEvent {
+class HelloEvent extends CustomEvent<void> {
   type = 'hello';
   name: string;
   constructor(name: string) {
@@ -22,12 +22,12 @@ class HelloEvent extends CustomEvent {
 class BelloEvent extends HelloEvent {
   type = 'bello';
 }
-interface EventHandlersEventMap {
+interface EventMap {
   "hello": HelloEvent;
   "bello": BelloEvent;
 }
 
-export default class Agent extends EventTarget {
+export default class Agent extends EventTarget<EventMap> {
   connManager: ConnManager;
   private config: Config
 
@@ -57,10 +57,6 @@ export default class Agent extends EventTarget {
 
   private greet(id: string) {
     console.log(`hello, id: ${id}`);
-  }
-
-  addEventListener<K extends keyof EventHandlersEventMap>(type: K, listener: (this: GlobalEventHandlers, ev: EventHandlersEventMap[K]) => any): void {
-    super.addEventListener(type, listener);
   }
 }
 

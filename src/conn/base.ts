@@ -1,34 +1,28 @@
 import EventTarget, { CustomEvent } from '../utils/event-target';
+import { Message } from '../utils/message';
 
-export enum MessageTerm {}
-interface MessageReceivedEventDetail {
-  term: MessageTerm
-  payload: any
-}
-class MessageReceivedEvent extends CustomEvent {
-  readonly detail: MessageReceivedEventDetail
+interface MessageReceivedEventDetail extends Message {
+  from: string;
 }
 
-interface ConnEventHandlersEventMap {
+export class MessageReceivedEvent extends CustomEvent<MessageReceivedEventDetail> {
+  type = 'receive';
+}
+
+interface ConnEventMap {
   'receive': MessageReceivedEvent
 }
 
 export interface ConnStartLinkOpts {
+  myAddr: string;
   addr: string;
 }
 
-abstract class Conn extends EventTarget {
+abstract class Conn extends EventTarget<ConnEventMap> {
 
   abstract startLink(opts: ConnStartLinkOpts): Promise<void>;
   abstract close(): Promise<void>;
-  abstract send(term: MessageTerm, payload: any): void;
-
-  addEventListener<K extends keyof ConnEventHandlersEventMap>(type: K, listener: (this: GlobalEventHandlers, ev: ConnEventHandlersEventMap[K]) => any): void {
-    super.addEventListener(type, listener);
-  }
-  removeEventListener<K extends keyof ConnEventHandlersEventMap>(type: K, listener: (this: GlobalEventHandlers, ev: ConnEventHandlersEventMap[K]) => any): void {
-    super.removeEventListener(type, listener);
-  }
+  abstract send(term: string, payload: any): void;
 }
 
 export default Conn;
