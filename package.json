@@ -12,7 +12,8 @@
     "browser-agent": "webpack serve --open --config webpack.config.js",
     "node-agent": "TARGET=node webpack --config webpack.config.js && node ./dist/demo-node.cjs",
     "bundle-browser": "webpack --config webpack.config.js",
-    "bundle-node": "TARGET=node webpack --config webpack.config.js"
+    "bundle-node": "TARGET=node webpack --config webpack.config.js",
+    "protobuf": "pbjs -t static-module -w es6 --dependency protobufjs/minimal.js src/messages/main.proto -o src/messages/main.js && pbts src/messages/main.js -o src/messages/main.d.ts"
   },
   "repository": {
     "type": "git",
@@ -30,6 +31,7 @@
     "webpack-dev-server": "^3.11.2"
   },
   "dependencies": {
+    "protobufjs": "~6.11.2",
     "ws": "^7.5.3"
   }
 }

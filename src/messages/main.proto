@@ -1,0 +1,12 @@
+package unnamedNetwork;
+syntax = "proto3";
+
+enum Terms {
+    HELLO = 0;
+}
+
+message HelloMessage {
+    Terms term = 0;
+    string my_name = 1;
+    repeated string addrs = 2;
+}

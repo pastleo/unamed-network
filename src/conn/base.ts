@@ -25,6 +25,7 @@ abstract class Conn extends EventTarget<ConnEventMap> {
   abstract startLink(opts: ConnStartLinkOpts): Promise<void>;
   abstract close(): Promise<void>;
   abstract send(term: string, payload: any): void;
+  abstract sendRaw(data: any): void;
 }
 
 export default Conn;

@@ -1,6 +1,11 @@
 import Conn, { ConnStartLinkOpts, MessageReceivedEvent } from './base'
 import { Message, toMessage, toRequestToConnResultMessage, RequestToConnMessage } from '../utils/message';
 
+//////////////
+import { unnamedNetwork as protobuf } from '../messages/main';
+const { HelloMessage, Terms } = protobuf;
+//////////////
+
 import NodeWebSocket from 'ws';
 // importing 'ws' node_modules when targeting browser will only get a function that throw error: ws does not work in the browser
 
@@ -55,9 +60,13 @@ class WsConn extends Conn {
 
   private setUpWs() {
     this.ws.onmessage = (message: MsgEvent) => {
-      const { term, payload } = toMessage(JSON.parse(message.data.toString()));
-      if (typeof term === 'string' && typeof payload === 'object') {
-        this.dispatchEvent(new MessageReceivedEvent({ term, payload, from: this.peerAddr }))
+      console.log('onmessage', message.data);
+
+      if (message.data instanceof Blob) {
+        message.data.arrayBuffer().then(arrayBuffer => {
+          const msg = HelloMessage.decode(new Uint8Array(arrayBuffer));
+          console.log(msg);
+        });
       }
     }
   }
@@ -69,6 +78,9 @@ class WsConn extends Conn {
   async send(term: string, payload: any) {
     const message: Message = { term, payload };
     this.ws.send(JSON.stringify(message));
+  }
+  async sendRaw(data: any) {
+    this.ws.send(data);
   }
 }
 
