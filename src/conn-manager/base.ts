@@ -1,9 +1,9 @@
 import EventTarget, { CustomEvent } from '../utils/event-target';
-import Conn from '../conn/base';
+import Conn, { MessageReceivedEvent } from '../conn/base';
 import WsConn from '../conn/ws';
 
 interface RequestToConnEventDetail {
-  addr: string;
+  peerAddr: string;
 }
 export class RequestToConnEvent extends CustomEvent<RequestToConnEventDetail> {
   type = 'request-to-conn'
@@ -13,7 +13,7 @@ export class RequestToConnEvent extends CustomEvent<RequestToConnEventDetail> {
 }
 
 interface NewConnEventDetail {
-  addr: string;
+  peerAddr: string;
   conn: Conn;
 }
 export class NewConnEvent extends CustomEvent<NewConnEventDetail> {
@@ -21,40 +21,82 @@ export class NewConnEvent extends CustomEvent<NewConnEventDetail> {
 }
 
 interface ConnManagerEventMap {
-  'request-to-conn': RequestToConnEvent
-  'new-conn': NewConnEvent
+  'request-to-conn': RequestToConnEvent;
+  'new-conn': NewConnEvent;
+  'receive': MessageReceivedEvent;
+}
+
+declare namespace ConnManager {
+  export interface WssConfig {
+    newConnTimeout: number;
+    requestToConnTimeout: number;
+  }
+}
+
+const wssConfigDefault: ConnManager.WssConfig = {
+  newConnTimeout: 1000,
+  requestToConnTimeout: 1000,
+}
+
+interface ConnsMap {
+  [peerAddr: string]: Conn;
 }
 
 abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
-  protected conns: Conn[] = [];
+  protected conns: ConnsMap = {};
+  protected config: ConnManager.WssConfig;
   myAddr: string;
+
+  constructor(config: Partial<ConnManager.WssConfig> = {}) {
+    super();
+    this.config = { ...wssConfigDefault, ...config };
+  }
 
   async start(myAddr: string): Promise<void> {
     this.myAddr = myAddr;
   }
 
-  connect(addr: string, viaAddr: string): Promise<void> {
-    const { protocol } = (new URL(addr));
+  connect(peerAddr: string, viaAddr: string): Promise<void> {
+    const { protocol } = (new URL(peerAddr));
 
     switch (protocol) {
       case 'ws:':
       case 'wss:':
-        return this.connectWs(addr);
+        return this.connectWs(peerAddr);
       case 'rtc:':
-        return this.connectRtc(addr, viaAddr);
+        return this.connectRtc(peerAddr, viaAddr);
       default:
-        throw new Error(`Unknown protocol: ${protocol}, addr: ${addr}`);
+        throw new Error(`Unknown protocol: ${protocol}, peerAddr: ${peerAddr}`);
     }
   }
 
-  async connectWs(addr: string): Promise<void> {
+  async connectWs(peerAddr: string): Promise<void> {
     const conn = new WsConn();
-    await conn.startLink({ myAddr: this.myAddr, addr });
-    this.conns.push(conn);
-    this.dispatchEvent(new NewConnEvent({ addr, conn }));
+    await conn.startLink({ myAddr: this.myAddr, peerAddr, timeout: this.config.requestToConnTimeout });
+    this.addConn(peerAddr, conn);
   }
 
-  abstract connectRtc(addr: string, viaAddr: string): Promise<void>;
+  protected addConn(peerAddr: string, conn: Conn): void {
+    this.conns[peerAddr] = conn;
+    conn.addEventListener('receive', event => {
+      this.dispatchEvent(event);
+    })
+    this.dispatchEvent(new NewConnEvent({ peerAddr, conn }));
+  }
+
+  abstract connectRtc(peerAddr: string, viaAddr: string): Promise<void>;
+
+  send(peerAddr: string, term: string, payload = {}): void {
+    this.getConn(peerAddr).send(term, payload);
+  }
+
+  getConn(peerAddr: string): Conn {
+    const conn = this.conns[peerAddr];
+    if (!conn) {
+      throw new Error(`conn not found for ${peerAddr}`);
+    }
+    return conn;
+  }
 }
 
 export default ConnManager;

@@ -11,22 +11,24 @@ type MsgEvent = MessageEvent | NodeWebSocket.MessageEvent;
 
 class WsConn extends Conn {
   private ws: Ws;
-  peerAddr: string;
 
-  startFromExisting(ws: Ws, addr: string) {
+  startFromExisting(ws: Ws, peerAddr: string) {
     this.ws = ws;
-    this.peerAddr = addr;
+    this.peerAddr = peerAddr;
     this.setUpWs();
   }
 
   startLink(opts: ConnStartLinkOpts): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.peerAddr = opts.addr;
-      this.ws = new WebSocket(opts.addr);
+      let ok = false;
+      this.peerAddr = opts.peerAddr;
+      this.ws = new WebSocket(opts.peerAddr);
 
       this.ws.onmessage = (message: MsgEvent) => {
-        const { ok } = toRequestToConnResultMessage(JSON.parse(message.data.toString()));
+        const resultMsg = toRequestToConnResultMessage(JSON.parse(message.data.toString()));
+        ok = resultMsg.ok;
         if (ok) {
+          this.setUpWs();
           resolve();
         }
       }
@@ -36,14 +38,18 @@ class WsConn extends Conn {
           addr: opts.myAddr,
         };
 
-        console.log('this.ws.onopen', message);
-
         this.ws.send(JSON.stringify(message));
       }
       this.ws.onerror = (error: any) => {
         console.error(error);
         reject();
       }
+
+      setTimeout(() => {
+        if (!ok) {
+          reject();
+        }
+      }, opts.timeout);
     })
   }
 

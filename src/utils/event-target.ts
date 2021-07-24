@@ -18,7 +18,7 @@ type EventTargetListeners<EventMapT> = {
 export default class EventTarget<EventMapT> {
   private listeners: EventTargetListeners<EventMapT> = {};
 
-  addEventListener<K extends keyof EventMapT>(type: K & string, listener: (this: EventTarget<EventMapT>, ev: EventMapT[K]) => any): void {
+  addEventListener<K extends keyof EventMapT>(type: K & string, listener: (this: EventTarget<EventMapT>, ev: EventMapT[K]) => void): void {
     if (!(type in this.listeners)) {
       this.listeners[type] = [];
     }
@@ -26,7 +26,7 @@ export default class EventTarget<EventMapT> {
     this.listeners[type].push(listener);
   }
 
-  removeEventListener<K extends keyof EventMapT>(type: K & string, listener: (this: EventTarget<EventMapT>, ev: EventMapT[K]) => any): void {
+  removeEventListener<K extends keyof EventMapT>(type: K & string, listener: (this: EventTarget<EventMapT>, ev: EventMapT[K]) => void): void {
     if (!(type in this.listeners)) return;
 
     const stack = this.listeners[type];

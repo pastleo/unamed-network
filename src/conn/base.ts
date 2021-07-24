@@ -15,10 +15,12 @@ interface ConnEventMap {
 
 export interface ConnStartLinkOpts {
   myAddr: string;
-  addr: string;
+  peerAddr: string;
+  timeout: number;
 }
 
 abstract class Conn extends EventTarget<ConnEventMap> {
+  peerAddr: string;
 
   abstract startLink(opts: ConnStartLinkOpts): Promise<void>;
   abstract close(): Promise<void>;

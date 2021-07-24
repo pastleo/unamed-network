@@ -1,26 +1,35 @@
 import ConnManager, { RequestToConnEvent, NewConnEvent } from './base';
 import WsConn from '../conn/ws';
-import WebSocket, { Server as WebSocketServer, ServerOptions } from 'ws';
+import WebSocket, { Server as WebSocketServer, ServerOptions as WsServerOptions } from 'ws';
 import { toRequestToConnMessage, RequestToConnResultMessage } from '../utils/message';
+
+declare namespace WssConnManager {
+  type ServerOptions = WsServerOptions
+}
 
 class WssConnManager extends ConnManager {
   private server: WebSocketServer;
-  private serverOpts: ServerOptions;
+  private serverOpts: WssConnManager.ServerOptions;
 
-  constructor(opts: ServerOptions) {
-    super();
+  constructor(config: Partial<ConnManager.WssConfig> = {}, opts: WssConnManager.ServerOptions = {}) {
+    super(config);
     this.serverOpts = opts;
   }
 
   async start(myAddr: string) {
     await super.start(myAddr);
 
+    const { hostname, port } = new URL(myAddr);
+    this.serverOpts = {
+      host: hostname, port: parseInt(port),
+      ...this.serverOpts,
+    }
+
     this.server = new WebSocketServer(this.serverOpts);
 
     this.server.on('connection', (websocket: WebSocket) => {
       this.onNewConnection(websocket);
     });
-    console.log('wss server started');
   }
 
   private onNewConnection(ws: WebSocket) {
@@ -28,8 +37,8 @@ class WssConnManager extends ConnManager {
     ws.addEventListener('message', event => {
       const requestToConnMessage = toRequestToConnMessage(JSON.parse(event.data.toString()));
       if (requestToConnMessage) {
-        const addr = requestToConnMessage.addr;
-        const event = new RequestToConnEvent({ addr });
+        const peerAddr = requestToConnMessage.addr;
+        const event = new RequestToConnEvent({ peerAddr });
         this.dispatchEvent(event);
 
         if (!event.defaultPrevented) {
@@ -37,9 +46,8 @@ class WssConnManager extends ConnManager {
           ws.send(JSON.stringify(acceptMessage));
 
           const conn = new WsConn();
-          conn.startFromExisting(ws, requestToConnMessage.addr);
-          this.conns.push(conn);
-          this.dispatchEvent(new NewConnEvent({ addr, conn }));
+          conn.startFromExisting(ws, peerAddr);
+          this.addConn(peerAddr, conn);
           ok = true;
         }
       }
@@ -50,10 +58,10 @@ class WssConnManager extends ConnManager {
       if (!ok) {
         ws.close();
       }
-    }, 1000);
+    }, this.config.newConnTimeout);
   }
 
-  async connectRtc(addr: string, viaAddr: string): Promise<void> {
+  async connectRtc(peerAddr: string, viaAddr: string): Promise<void> {
   }
 }
 
