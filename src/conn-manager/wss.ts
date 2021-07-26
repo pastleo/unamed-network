@@ -11,7 +11,7 @@ class WssConnManager extends ConnManager {
   private server: WebSocketServer;
   private serverOpts: WssConnManager.ServerOptions;
 
-  constructor(config: Partial<ConnManager.WssConfig> = {}, opts: WssConnManager.ServerOptions = {}) {
+  constructor(config: Partial<ConnManager.Config> = {}, opts: WssConnManager.ServerOptions = {}) {
     super(config);
     this.serverOpts = opts;
   }
@@ -37,18 +37,19 @@ class WssConnManager extends ConnManager {
     ws.addEventListener('message', event => {
       const requestToConnMessage = toRequestToConnMessage(JSON.parse(event.data.toString()));
       if (requestToConnMessage) {
-        const peerAddr = requestToConnMessage.addr;
+        const { myAddr: peerAddr, connId } = requestToConnMessage;
         const event = new RequestToConnEvent({ peerAddr });
         this.dispatchEvent(event);
 
         if (!event.defaultPrevented) {
           const acceptMessage: RequestToConnResultMessage = {
             term: 'requestToConnResult',
-            ok: true,
+            myAddr: this.myAddr, peerAddr,
+            ok: true, connId,
           };
           ws.send(JSON.stringify(acceptMessage));
 
-          const conn = new WsConn();
+          const conn = new WsConn(connId);
           conn.startFromExisting(ws, peerAddr);
           this.addConn(peerAddr, conn);
           ok = true;

@@ -1,6 +1,11 @@
 import EventTarget, { CustomEvent } from '../utils/event-target';
 import Conn, { MessageReceivedEvent } from '../conn/base';
-import { Message } from '../utils/message';
+import {
+  Message,
+  RequestToConnMessage, newRequestToConnMessage,
+  RequestToConnResultMessage, newRequestToConnResultMessage,
+  RtcIceMessage, newRtcIceMessage,
+} from '../utils/message';
 import WsConn from '../conn/ws';
 
 interface RequestToConnEventDetail {
@@ -28,13 +33,13 @@ interface ConnManagerEventMap {
 }
 
 declare namespace ConnManager {
-  export interface WssConfig {
+  export interface Config {
     newConnTimeout: number;
     requestToConnTimeout: number;
   }
 }
 
-const wssConfigDefault: ConnManager.WssConfig = {
+const wssConfigDefault: ConnManager.Config = {
   newConnTimeout: 1000,
   requestToConnTimeout: 1000,
 }
@@ -45,10 +50,10 @@ interface ConnsMap {
 
 abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
   protected conns: ConnsMap = {};
-  protected config: ConnManager.WssConfig;
+  protected config: ConnManager.Config;
   myAddr: string;
 
-  constructor(config: Partial<ConnManager.WssConfig> = {}) {
+  constructor(config: Partial<ConnManager.Config> = {}) {
     super();
     this.config = { ...wssConfigDefault, ...config };
   }
@@ -80,7 +85,7 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
   protected addConn(peerAddr: string, conn: Conn): void {
     this.conns[peerAddr] = conn;
     conn.addEventListener('receive', event => {
-      this.dispatchEvent(event);
+      this.onReceive(event);
     })
     this.dispatchEvent(new NewConnEvent({ peerAddr, conn }));
   }
@@ -97,6 +102,33 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
       throw new Error(`conn not found for ${peerAddr}`);
     }
     return conn;
+  }
+
+  private onReceive(event: MessageReceivedEvent) {
+    this.dispatchEvent(event);
+
+    if (!event.defaultPrevented) {
+      switch (event.detail.term) {
+        case 'requestToConn':
+          return this.receiveRequestToConn(newRequestToConnMessage(event.detail), event.detail.from);
+        case 'requestToConnResult':
+          return this.receiveRequestToConnResult(newRequestToConnResultMessage(event.detail), event.detail.from);
+        case 'rtcIce':
+          return this.receiveRtcIce(newRtcIceMessage(event.detail), event.detail.from);
+      }
+    }
+  }
+
+  protected receiveRequestToConn(message: RequestToConnMessage, _fromAddr: string) {
+    this.send(message.peerAddr, message);
+  }
+
+  protected receiveRequestToConnResult(message: RequestToConnResultMessage, _fromAddr: string) {
+    this.send(message.peerAddr, message);
+  }
+
+  protected receiveRtcIce(message: RtcIceMessage, _fromAddr: string) {
+    this.send(message.peerAddr, message);
   }
 }
 

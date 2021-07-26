@@ -1,5 +1,5 @@
 import Conn, { ConnStartLinkOpts, MessageReceivedEvent } from './base'
-import { Message, toMessage, toRequestToConnResultMessage, RequestToConnMessage } from '../utils/message';
+import { Message, toRequestToConnResultMessage, RequestToConnMessage } from '../utils/message';
 
 import NodeWebSocket from 'ws';
 // importing 'ws' node_modules when targeting browser will only get a function that throw error: ws does not work in the browser
@@ -15,6 +15,7 @@ class WsConn extends Conn {
   startFromExisting(ws: Ws, peerAddr: string) {
     this.ws = ws;
     this.peerAddr = peerAddr;
+    this.connected = true;
     this.setUpWs();
   }
 
@@ -35,7 +36,9 @@ class WsConn extends Conn {
       this.ws.onopen = () => {
         const message: RequestToConnMessage = {
           term: 'requestToConn',
-          addr: opts.myAddr,
+          connId: this.connId,
+          myAddr: opts.myAddr,
+          peerAddr: opts.peerAddr,
         };
 
         this.ws.send(JSON.stringify(message));
@@ -55,10 +58,7 @@ class WsConn extends Conn {
 
   private setUpWs() {
     this.ws.onmessage = (message: MsgEvent) => {
-      const messageContent = toMessage(JSON.parse(message.data.toString()));
-      if (messageContent) {
-        this.dispatchEvent(new MessageReceivedEvent({ ...messageContent, from: this.peerAddr }))
-      }
+      this.onMessageData(message.data.toString());
     }
   }
 
