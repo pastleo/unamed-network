@@ -1,6 +1,8 @@
 //import Agent from 'unnamed-network/agent';
 import BrowserConnManager from 'unnamed-network/conn-manager/browser';
 
+import { PingMessage } from '../utils/message';
+
 const connManager = new BrowserConnManager();
 (window as any).cm = connManager;
 
@@ -10,6 +12,9 @@ const connManager = new BrowserConnManager();
 
   connManager.addEventListener('new-conn', event => {
     console.log('new-conn', event.detail.peerAddr);
+
+    const message: PingMessage = { term: 'ping', timestamp: Date.now() };
+    event.detail.conn.send(message);
   });
   connManager.addEventListener('receive', event => {
     console.log('receive', event);

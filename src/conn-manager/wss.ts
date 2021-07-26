@@ -1,4 +1,4 @@
-import ConnManager, { RequestToConnEvent, NewConnEvent } from './base';
+import ConnManager, { RequestToConnEvent } from './base';
 import WsConn from '../conn/ws';
 import WebSocket, { Server as WebSocketServer, ServerOptions as WsServerOptions } from 'ws';
 import { toRequestToConnMessage, RequestToConnResultMessage } from '../utils/message';
@@ -42,7 +42,10 @@ class WssConnManager extends ConnManager {
         this.dispatchEvent(event);
 
         if (!event.defaultPrevented) {
-          const acceptMessage: RequestToConnResultMessage = { ok: true };
+          const acceptMessage: RequestToConnResultMessage = {
+            term: 'requestToConnResult',
+            ok: true,
+          };
           ws.send(JSON.stringify(acceptMessage));
 
           const conn = new WsConn();

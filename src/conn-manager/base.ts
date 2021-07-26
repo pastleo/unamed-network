@@ -1,5 +1,6 @@
 import EventTarget, { CustomEvent } from '../utils/event-target';
 import Conn, { MessageReceivedEvent } from '../conn/base';
+import { Message } from '../utils/message';
 import WsConn from '../conn/ws';
 
 interface RequestToConnEventDetail {
@@ -86,8 +87,8 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
 
   abstract connectRtc(peerAddr: string, viaAddr: string): Promise<void>;
 
-  send(peerAddr: string, term: string, payload = {}): void {
-    this.getConn(peerAddr).send(term, payload);
+  send(peerAddr: string, message: Message): void {
+    this.getConn(peerAddr).send(message);
   }
 
   getConn(peerAddr: string): Conn {

@@ -20,14 +20,13 @@ class WsConn extends Conn {
 
   startLink(opts: ConnStartLinkOpts): Promise<void> {
     return new Promise((resolve, reject) => {
-      let ok = false;
       this.peerAddr = opts.peerAddr;
       this.ws = new WebSocket(opts.peerAddr);
 
       this.ws.onmessage = (message: MsgEvent) => {
         const resultMsg = toRequestToConnResultMessage(JSON.parse(message.data.toString()));
-        ok = resultMsg.ok;
-        if (ok) {
+        if (resultMsg.ok) {
+          this.connected = true;
           this.setUpWs();
           resolve();
         }
@@ -35,6 +34,7 @@ class WsConn extends Conn {
 
       this.ws.onopen = () => {
         const message: RequestToConnMessage = {
+          term: 'requestToConn',
           addr: opts.myAddr,
         };
 
@@ -46,7 +46,7 @@ class WsConn extends Conn {
       }
 
       setTimeout(() => {
-        if (!ok) {
+        if (!this.connected) {
           reject();
         }
       }, opts.timeout);
@@ -55,9 +55,9 @@ class WsConn extends Conn {
 
   private setUpWs() {
     this.ws.onmessage = (message: MsgEvent) => {
-      const { term, payload } = toMessage(JSON.parse(message.data.toString()));
-      if (typeof term === 'string' && typeof payload === 'object') {
-        this.dispatchEvent(new MessageReceivedEvent({ term, payload, from: this.peerAddr }))
+      const messageContent = toMessage(JSON.parse(message.data.toString()));
+      if (messageContent) {
+        this.dispatchEvent(new MessageReceivedEvent({ ...messageContent, from: this.peerAddr }))
       }
     }
   }
@@ -66,8 +66,7 @@ class WsConn extends Conn {
     this.ws.close();
   }
 
-  async send(term: string, payload: any) {
-    const message: Message = { term, payload };
+  async send(message: Message) {
     this.ws.send(JSON.stringify(message));
   }
 }

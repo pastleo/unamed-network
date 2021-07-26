@@ -1,29 +1,47 @@
-export interface RequestToConnMessage {
-  addr: string;
+export interface Message {
+  term: string;
 }
 
-export function toRequestToConnMessage(data: any): RequestToConnMessage {
-  if (typeof data.addr === 'string') {
-    return { addr: data.addr };
+export function toMessage(data: any): Message {
+  if (typeof data.term === 'string') {
+    return data
   }
 }
 
-export interface RequestToConnResultMessage {
+/*
+  connReqRelay: 'connReqRelay',
+  connAcceptRelay: 'connAcceptRelay',
+  rtcIce: 'rtcIce',
+  rtcIceRelay: 'rtcIceRelay',
+  connRejectRelay: 'connRejectRelay',
+*/
+
+export interface RequestToConnMessage extends Message {
+  term: 'requestToConn'
+  addr: string;
+}
+export function toRequestToConnMessage(data: any): RequestToConnMessage {
+  if (typeof data.addr === 'string') {
+    return { term: 'requestToConn', addr: data.addr };
+  }
+}
+
+export interface RequestToConnResultMessage extends Message {
+  term: 'requestToConnResult'
   ok: boolean;
 }
 export function toRequestToConnResultMessage(data: any): RequestToConnResultMessage {
   if (typeof data.ok === 'boolean') {
-    return { ok: data.ok };
+    return { term: 'requestToConnResult', ok: data.ok };
   }
 }
 
-export interface Message {
-  term: string;
-  payload: object;
+export interface PingMessage extends Message {
+  term: 'ping'
+  timestamp: number
 }
-
-export function toMessage(data: any): Message {
-  if (typeof data.term === 'string' && typeof data.payload === 'object') {
-    return { term: data.term, payload: data.payload };
+export function toPingMessage(data: any): PingMessage {
+  if (typeof data.timestamp === 'number') {
+    return { term: 'ping', timestamp: data.timestamp };
   }
 }
