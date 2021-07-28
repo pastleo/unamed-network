@@ -2,53 +2,20 @@ import ConnManager, { RequestToConnEvent } from './base';
 import RtcConn from '../conn/rtc';
 import { RequestToConnMessage, RequestToConnResultMessage, RtcIceMessage } from '../utils/message';
 
-export interface RtcConnsMap {
-  [peerAddr: string]: RtcConn;
-}
-
 class BrowserConnManager extends ConnManager {
-  private pendingRtcConns: RtcConnsMap = {};
+  private pendingRtcConns: Record<string, RtcConn> = {};
 
-  async connectRtc(peerAddr: string, viaAddr: string, existingOffer?: RTCSessionDescription): Promise<void> {
+  async connectRtc(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
     const rtcConn = new RtcConn();
     this.pendingRtcConns[peerAddr] = rtcConn;
 
     try {
       await rtcConn.startLink({
-        myAddr: this.myAddr,
-        peerAddr, offer: existingOffer,
+        myAddr: this.myAddr, peerAddr,
+        beingConnected: false,
         timeout: this.config.requestToConnTimeout,
-        connVia: {
-          requestToConn: async (peerAddr: string, connId: string, offer: RTCSessionDescription) => {
-            const message: RequestToConnMessage = {
-              term: 'requestToConn',
-              myAddr: this.myAddr, peerAddr,
-              connId, offer,
-            };
-
-            this.send(viaAddr, message);
-          },
-          requestToConnResult: async (_peerAddr: string, connId: string, answer: RTCSessionDescription) => {
-            const message: RequestToConnResultMessage = {
-              term: 'requestToConnResult',
-              myAddr: this.myAddr, peerAddr,
-              connId, answer,
-              ok: true,
-            };
-            console.log(viaAddr, message);
-
-            this.send(viaAddr, message);
-          },
-          rtcIce: async (_peerAddr: string, connId: string, ice: RTCIceCandidate) => {
-            const message: RtcIceMessage = {
-              term: 'rtcIce',
-              myAddr: this.myAddr, peerAddr,
-              connId, ice,
-            };
-
-            this.send(viaAddr, message);
-          },
-        },
+        connVia: this.connVia(viaAddr),
+        ...opts,
       });
       this.addConn(peerAddr, rtcConn);
     } catch (error) {
@@ -65,7 +32,10 @@ class BrowserConnManager extends ConnManager {
       this.dispatchEvent(event);
 
       if (!event.defaultPrevented) {
-        this.connectRtc(peerAddr, fromAddr, message.offer);
+        this.connect(peerAddr, fromAddr, {
+          offer: message.offer,
+          beingConnected: true,
+        });
       }
     } else {
       this.send(message.peerAddr, message);
@@ -75,9 +45,9 @@ class BrowserConnManager extends ConnManager {
   protected receiveRequestToConnResult(message: RequestToConnResultMessage, _fromAddr: string) {
     if (message.peerAddr === this.myAddr) {
       const peerAddr = message.myAddr;
-      const pendingRtcConn = this.pendingRtcConns[peerAddr];
-      if (pendingRtcConn) {
-        pendingRtcConn.requestToConnResult(message.answer);
+      const pendingConn = this.pendingRtcConns[peerAddr];
+      if (pendingConn) {
+        pendingConn.requestToConnResult(message.answer);
       }
     } else {
       this.send(message.peerAddr, message);
@@ -87,9 +57,9 @@ class BrowserConnManager extends ConnManager {
   protected receiveRtcIce(message: RtcIceMessage, _fromAddr: string) {
     if (message.peerAddr === this.myAddr) {
       const peerAddr = message.myAddr;
-      const pendingRtcConn = this.pendingRtcConns[peerAddr];
-      if (pendingRtcConn) {
-        pendingRtcConn.rtcIce(message.ice);
+      const pendingConn = this.pendingRtcConns[peerAddr];
+      if (pendingConn) {
+        pendingConn.rtcIce(message.ice);
       }
     } else {
       this.send(message.peerAddr, message);

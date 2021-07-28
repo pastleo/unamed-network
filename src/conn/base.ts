@@ -14,10 +14,18 @@ interface ConnEventMap {
   'receive': MessageReceivedEvent
 }
 
-export interface ConnStartLinkOpts {
-  myAddr: string;
-  peerAddr: string;
-  timeout: number;
+declare namespace Conn {
+  interface Via {
+    requestToConn: (peerAddr: string, connId: string, payload: any) => Promise<void>,
+    requestToConnResult: (peerAddr: string, connId: string, payload: any) => Promise<void>,
+    rtcIce: (peerAddr: string, connId: string, payload?: any) => Promise<void>,
+  }
+  interface StartLinkOpts {
+    myAddr: string;
+    peerAddr: string;
+    timeout: number;
+    beingConnected: boolean;
+  }
 }
 
 abstract class Conn extends EventTarget<ConnEventMap> {
@@ -30,8 +38,13 @@ abstract class Conn extends EventTarget<ConnEventMap> {
     this.connId = connId || randomStr();
   }
 
-  abstract startLink(opts: ConnStartLinkOpts): Promise<void>;
+  abstract startLink(opts: Conn.StartLinkOpts): Promise<void>;
+
+  // TODO
+  //abstract onConnVia(peerAddr: string, connId: string, term: string, data: any): void;
+
   abstract close(): Promise<void>;
+
   abstract send(message: Message): void;
 
   protected onMessageData(data: string) {

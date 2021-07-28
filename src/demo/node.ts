@@ -1,6 +1,7 @@
 //import Agent from 'unnamed-network/agent';
 import WssConnManager from 'unnamed-network/conn-manager/wss';
 import repl from 'repl';
+import { PingMessage } from '../utils/message';
 
 const serverOpts: WssConnManager.ServerOptions = {};
 if (process.env.HOST) serverOpts.host = process.env.HOST;
@@ -15,6 +16,9 @@ const connManager = new WssConnManager({}, serverOpts);
 
   connManager.addEventListener('new-conn', event => {
     console.log('new-conn', event.detail.peerAddr);
+
+    const message: PingMessage = { term: 'ping', timestamp: Date.now() };
+    event.detail.conn.send(message);
   });
   connManager.addEventListener('receive', event => {
     console.log('receive', event);

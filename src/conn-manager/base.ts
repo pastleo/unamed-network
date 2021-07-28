@@ -7,6 +7,7 @@ import {
   RtcIceMessage, newRtcIceMessage,
 } from '../utils/message';
 import WsConn from '../conn/ws';
+import RtcConn from '../conn/rtc';
 
 interface RequestToConnEventDetail {
   peerAddr: string;
@@ -37,6 +38,7 @@ declare namespace ConnManager {
     newConnTimeout: number;
     requestToConnTimeout: number;
   }
+  type ConnectOpts = Partial<WsConn.StartLinkOpts | RtcConn.StartLinkOpts>;
 }
 
 const wssConfigDefault: ConnManager.Config = {
@@ -44,12 +46,8 @@ const wssConfigDefault: ConnManager.Config = {
   requestToConnTimeout: 1000,
 }
 
-interface ConnsMap {
-  [peerAddr: string]: Conn;
-}
-
 abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
-  protected conns: ConnsMap = {};
+  protected conns: Record<string, Conn> = {};
   protected config: ConnManager.Config;
   myAddr: string;
 
@@ -62,25 +60,34 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     this.myAddr = myAddr;
   }
 
-  connect(peerAddr: string, viaAddr: string): Promise<void> {
+  connect(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
     const { protocol } = (new URL(peerAddr));
 
     switch (protocol) {
       case 'ws:':
       case 'wss:':
-        return this.connectWs(peerAddr);
+        return this.connectWs(peerAddr, viaAddr, opts);
       case 'rtc:':
-        return this.connectRtc(peerAddr, viaAddr);
+        return this.connectRtc(peerAddr, viaAddr, opts);
       default:
         throw new Error(`Unknown protocol: ${protocol}, peerAddr: ${peerAddr}`);
     }
   }
 
-  async connectWs(peerAddr: string): Promise<void> {
+  protected async connectWs(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
     const conn = new WsConn();
-    await conn.startLink({ myAddr: this.myAddr, peerAddr, timeout: this.config.requestToConnTimeout });
+    const beingConnected = opts.beingConnected || false;
+    await conn.startLink({
+      myAddr: this.myAddr, peerAddr,
+      timeout: beingConnected ? this.config.newConnTimeout : this.config.requestToConnTimeout,
+      beingConnected,
+      connVia: this.connVia(viaAddr),
+      ...opts,
+    });
     this.addConn(peerAddr, conn);
   }
+
+  protected abstract connectRtc(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts): Promise<void>;
 
   protected addConn(peerAddr: string, conn: Conn): void {
     this.conns[peerAddr] = conn;
@@ -90,7 +97,38 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     this.dispatchEvent(new NewConnEvent({ peerAddr, conn }));
   }
 
-  abstract connectRtc(peerAddr: string, viaAddr: string): Promise<void>;
+  protected connVia(viaAddr: string): Conn.Via {
+    return {
+      requestToConn: async (peerAddr: string, connId: string, offer: RTCSessionDescription) => {
+        const message: RequestToConnMessage = {
+          term: 'requestToConn',
+          myAddr: this.myAddr, peerAddr,
+          connId, offer,
+        };
+
+        this.send(viaAddr, message);
+      },
+      requestToConnResult: async (peerAddr: string, connId: string, answer: RTCSessionDescription) => {
+        const message: RequestToConnResultMessage = {
+          term: 'requestToConnResult',
+          myAddr: this.myAddr, peerAddr,
+          connId, answer,
+          ok: true,
+        };
+
+        this.send(viaAddr, message);
+      },
+      rtcIce: async (peerAddr: string, connId: string, ice: RTCIceCandidate) => {
+        const message: RtcIceMessage = {
+          term: 'rtcIce',
+          myAddr: this.myAddr, peerAddr,
+          connId, ice,
+        };
+
+        this.send(viaAddr, message);
+      },
+    }
+  }
 
   send(peerAddr: string, message: Message): void {
     this.getConn(peerAddr).send(message);

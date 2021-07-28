@@ -1,18 +1,19 @@
-import Conn, { ConnStartLinkOpts, MessageReceivedEvent } from './base';
+import Conn from './base';
 import { Message } from '../utils/message';
 
 const DATA_CHANNEL_NAME = 'data';
 const RTC_CONN_READY_STATES = ['connected', 'completed'];
 
-export interface ConnVia {
-  requestToConn: (peerAddr: string, connId: string, offer: RTCSessionDescription) => Promise<void>,
-  requestToConnResult: (peerAddr: string, connId: string, answer: RTCSessionDescription) => Promise<void>,
-  rtcIce: (peerAddr: string, connId: string, ice: RTCIceCandidate) => Promise<void>,
-}
-
-interface RtcConnStartLinkOpts extends ConnStartLinkOpts {
-  connVia: ConnVia;
-  offer?: RTCSessionDescription;
+declare namespace RtcConn {
+  interface Via extends Conn.Via {
+    requestToConn: (peerAddr: string, connId: string, offer: RTCSessionDescription) => Promise<void>,
+    requestToConnResult: (peerAddr: string, connId: string, answer: RTCSessionDescription) => Promise<void>,
+    rtcIce: (peerAddr: string, connId: string, ice: RTCIceCandidate) => Promise<void>,
+  }
+  interface StartLinkOpts extends Conn.StartLinkOpts {
+    connVia: RtcConn.Via;
+    offer?: RTCSessionDescription;
+  }
 }
 
 class RtcConn extends Conn {
@@ -30,8 +31,8 @@ class RtcConn extends Conn {
     };
   }
 
-  startLink(opts: RtcConnStartLinkOpts): Promise<void> {
-    const { peerAddr, connVia, offer, timeout } = opts;
+  startLink(opts: RtcConn.StartLinkOpts): Promise<void> {
+    const { peerAddr, connVia, beingConnected, timeout, offer } = opts;
     this.peerAddr = peerAddr;
     return new Promise((resolve, reject) => {
       this.startLinkResolve = resolve;
@@ -43,7 +44,7 @@ class RtcConn extends Conn {
         }
       }, timeout);
 
-      if (offer) {
+      if (beingConnected) {
         this.rtcAnsweringFlow(peerAddr, connVia, offer);
       } else {
         this.rtcOfferingFlow(peerAddr, connVia);
@@ -51,7 +52,7 @@ class RtcConn extends Conn {
     })
   }
 
-  private async rtcOfferingFlow(peerAddr: string, connVia: ConnVia) {
+  private async rtcOfferingFlow(peerAddr: string, connVia: RtcConn.Via) {
     this.setupChannel(this.rtcConn.createDataChannel(DATA_CHANNEL_NAME));
 
     await this.rtcConn.setLocalDescription(await this.rtcConn.createOffer());
@@ -60,7 +61,7 @@ class RtcConn extends Conn {
     connVia.requestToConn(peerAddr, this.connId, offer);
   }
 
-  private async rtcAnsweringFlow(peerAddr: string, connVia: ConnVia, offer: RTCSessionDescription) {
+  private async rtcAnsweringFlow(peerAddr: string, connVia: RtcConn.Via, offer: RTCSessionDescription) {
     await this.rtcConn.setRemoteDescription(offer);
     await this.rtcConn.setLocalDescription(await this.rtcConn.createAnswer());
     const answer = this.rtcConn.localDescription;
@@ -68,7 +69,7 @@ class RtcConn extends Conn {
     connVia.requestToConnResult(peerAddr, this.connId, answer);
   }
 
-  private setupIceCandidate(connVia: ConnVia) {
+  private setupIceCandidate(connVia: RtcConn.Via) {
     this.rtcConn.onicecandidate = ({ candidate }) => {
       if (candidate) {
         connVia.rtcIce(this.peerAddr, this.connId, candidate);
