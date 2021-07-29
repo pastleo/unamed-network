@@ -7,11 +7,13 @@ const serverOpts: WssConnManager.ServerOptions = {};
 if (process.env.HOST) serverOpts.host = process.env.HOST;
 if (process.env.PORT) serverOpts.port = parseInt(process.env.PORT);
 
-const connManager = new WssConnManager({}, serverOpts);
+const connManager = new WssConnManager({
+  myAddr: process.env.ADDR || 'ws://localhost:8081',
+}, serverOpts);
 (global as any).cm = connManager;
 
 (async () => {
-  await connManager.start(process.env.ADDR || 'ws://localhost:8081');
+  await connManager.start();
   console.log('connManager started');
 
   connManager.addEventListener('new-conn', event => {

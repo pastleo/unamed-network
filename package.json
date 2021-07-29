@@ -9,6 +9,7 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "browser-agent-devserver": "webpack serve --config webpack.config.js",
     "browser-agent": "webpack serve --open --config webpack.config.js",
     "node-agent": "TARGET=node webpack --config webpack.config.js && node ./dist/demo-node.cjs",
     "bundle-browser": "webpack --config webpack.config.js",

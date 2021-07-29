@@ -18,10 +18,10 @@ class WssConnManager extends ConnManager {
     this.serverOpts = opts;
   }
 
-  async start(myAddr: string) {
-    await super.start(myAddr);
+  async start() {
+    await super.start();
 
-    const { hostname, port } = new URL(myAddr);
+    const { hostname, port } = new URL(this.myAddr);
     this.serverOpts = {
       host: hostname, port: parseInt(port),
       ...this.serverOpts,
