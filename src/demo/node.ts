@@ -1,7 +1,7 @@
 //import Agent from 'unnamed-network/agent';
 import WssConnManager from 'unnamed-network/conn-manager/wss';
 import repl from 'repl';
-import { PingMessage } from '../utils/message';
+import { PingMessage } from '../misc/message';
 
 const serverOpts: WssConnManager.ServerOptions = {};
 if (process.env.HOST) serverOpts.host = process.env.HOST;

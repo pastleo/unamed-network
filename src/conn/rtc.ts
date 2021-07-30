@@ -1,5 +1,5 @@
 import Conn from './base';
-import { Message } from '../utils/message';
+import { Message } from '../misc/message';
 
 const DATA_CHANNEL_NAME = 'data';
 const RTC_CONN_READY_STATES = ['connected', 'completed'];

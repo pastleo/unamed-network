@@ -1,6 +1,6 @@
-import EventTarget, { CustomEvent } from '../utils/event-target';
-import { Message, toMessage } from '../utils/message';
-import { randomStr } from '../utils/utils';
+import EventTarget, { CustomEvent } from '../misc/event-target';
+import { Message, toMessage } from '../misc/message';
+import { randomStr } from '../misc/utils';
 
 interface MessageReceivedEventDetail extends Message {
   from: string;

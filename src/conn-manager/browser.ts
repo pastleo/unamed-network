@@ -1,17 +1,17 @@
 import ConnManager, { RequestToConnEvent } from './base';
 import RtcConn from '../conn/rtc';
-import { RequestToConnMessage, RequestToConnResultMessage, RtcIceMessage } from '../utils/message';
+import { RequestToConnMessage, RequestToConnResultMessage, RtcIceMessage } from '../misc/message';
 
 class BrowserConnManager extends ConnManager {
   private pendingRtcConns: Record<string, RtcConn> = {};
 
-  async connectRtc(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
+  async connectUnnamed(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
     const rtcConn = new RtcConn();
     this.pendingRtcConns[peerAddr] = rtcConn;
 
     try {
       await rtcConn.startLink({
-        myAddr: this.myAddr, peerAddr,
+        myAddr: this.myIdentity.addr, peerAddr,
         beingConnected: false,
         timeout: this.config.requestToConnTimeout,
         connVia: this.connVia(viaAddr),
@@ -26,7 +26,7 @@ class BrowserConnManager extends ConnManager {
   }
 
   protected receiveRequestToConn(message: RequestToConnMessage, fromAddr: string) {
-    if (message.peerAddr === this.myAddr) {
+    if (message.peerAddr === this.myIdentity.addr) {
       const peerAddr = message.myAddr;
       const event = new RequestToConnEvent({ peerAddr });
       this.dispatchEvent(event);
@@ -43,7 +43,7 @@ class BrowserConnManager extends ConnManager {
   }
 
   protected receiveRequestToConnResult(message: RequestToConnResultMessage, _fromAddr: string) {
-    if (message.peerAddr === this.myAddr) {
+    if (message.peerAddr === this.myIdentity.addr) {
       const peerAddr = message.myAddr;
       const pendingConn = this.pendingRtcConns[peerAddr];
       if (pendingConn) {
@@ -55,7 +55,7 @@ class BrowserConnManager extends ConnManager {
   }
 
   protected receiveRtcIce(message: RtcIceMessage, _fromAddr: string) {
-    if (message.peerAddr === this.myAddr) {
+    if (message.peerAddr === this.myIdentity.addr) {
       const peerAddr = message.myAddr;
       const pendingConn = this.pendingRtcConns[peerAddr];
       if (pendingConn) {

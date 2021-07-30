@@ -1,5 +1,5 @@
 import Conn from './base'
-import { Message, toRequestToConnResultMessage, RequestToConnMessage, RequestToConnResultMessage } from '../utils/message';
+import { Message, toRequestToConnResultMessage, RequestToConnMessage, RequestToConnResultMessage } from '../misc/message';
 
 import NodeWebSocket from 'ws';
 // importing 'ws' node_modules when targeting browser will only get a function that throw error: ws does not work in the browser

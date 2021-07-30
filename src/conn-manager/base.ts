@@ -1,14 +1,14 @@
-import crypto from 'isomorphic-webcrypto';
-import EventTarget, { CustomEvent } from '../utils/event-target';
+import EventTarget, { CustomEvent } from '../misc/event-target';
+import Identity, { verifyPeerAddr, verifySignature } from '../misc/identity';
 import Conn, { MessageReceivedEvent } from '../conn/base';
+import WsConn from '../conn/ws';
+import RtcConn from '../conn/rtc';
 import {
   Message,
   RequestToConnMessage, newRequestToConnMessage,
   RequestToConnResultMessage, newRequestToConnResultMessage,
   RtcIceMessage, newRtcIceMessage,
-} from '../utils/message';
-import WsConn from '../conn/ws';
-import RtcConn from '../conn/rtc';
+} from '../misc/message';
 
 interface RequestToConnEventDetail {
   peerAddr: string;
@@ -35,14 +35,12 @@ interface ConnManagerEventMap {
 }
 
 declare namespace ConnManager {
-  export interface Config {
+  interface ConnManagerConfig {
     newConnTimeout: number;
     requestToConnTimeout: number;
-
-    myAddr?: string;
-    signingKeyPair?: CryptoKeyPair;
-    encryptionKeyPair?: CryptoKeyPair;
+    [opt: string]: any;
   }
+  type Config = ConnManager.ConnManagerConfig | Identity.Config;
   type ConnectOpts = Partial<WsConn.StartLinkOpts | RtcConn.StartLinkOpts>;
 }
 
@@ -51,126 +49,40 @@ const configDefault: ConnManager.Config = {
   requestToConnTimeout: 1000,
 }
 
-function concatArrayBuffer(ab1: ArrayBuffer, ab2: ArrayBuffer): ArrayBuffer {
-  const newArr = new Uint8Array(ab1.byteLength + ab2.byteLength);
-  newArr.set(new Uint8Array(ab1));
-  newArr.set(new Uint8Array(ab2), ab1.byteLength);
-  return newArr.buffer;
-}
-
-function arrayBufferTobase64(ab: ArrayBuffer): string {
-  return btoa(String.fromCharCode.apply(null, new Uint8Array(ab)));
-}
-
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  return Uint8Array.from(atob(base64), c => c.charCodeAt(0))
-}
-
 abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
   protected conns: Record<string, Conn> = {};
   protected config: ConnManager.Config;
-
-  myAddr: string;
-  private signingKeyPair: CryptoKeyPair;
-  private encryptionKeyPair: CryptoKeyPair;
-  signingPubKey: string;
-  encryptionPubKey: string;
+  myIdentity: Identity;
 
   constructor(config: Partial<ConnManager.Config> = {}) {
     super();
     this.config = { ...configDefault, ...config };
-
-    if (config.myAddr) this.myAddr = config.myAddr;
-    if (config.encryptionKeyPair) this.encryptionKeyPair = config.encryptionKeyPair;
-    if (config.signingKeyPair) this.signingKeyPair = config.signingKeyPair;
+    this.myIdentity = new Identity(config);
   }
 
   async start(): Promise<void> {
-    if (!this.signingKeyPair) {
-      this.signingKeyPair = await crypto.subtle.generateKey(
-        {
-          name: "ECDSA",
-          namedCurve: "P-384"
-        },
-        true,
-        ["sign", "verify"]
-      );
-    }
-
-    if (!this.encryptionKeyPair) {
-      this.encryptionKeyPair = await crypto.subtle.generateKey(
-        {
-          name: "RSA-OAEP",
-          modulusLength: 4096,
-          publicExponent: new Uint8Array([1, 0, 1]),
-          hash: "SHA-256"
-        },
-        true,
-        ["encrypt", "decrypt"],
-      );
-    }
-
-    const signingPubKey = await crypto.subtle.exportKey('raw', this.signingKeyPair.publicKey);
-    const encryptionPubKey = await crypto.subtle.exportKey('spki', this.encryptionKeyPair.publicKey);
-    this.signingPubKey = arrayBufferTobase64(signingPubKey);
-    this.encryptionPubKey = arrayBufferTobase64(encryptionPubKey);
-
-    const oriSigningPubKey = new Uint8Array(signingPubKey);
-    console.log({ oriSigningPubKey });
-
-    if (!this.myAddr) {
-      const pubKeyHash = await crypto.subtle.digest('SHA-512', concatArrayBuffer(signingPubKey, encryptionPubKey));
-      this.myAddr = `#${arrayBufferTobase64(pubKeyHash)}`;
-    }
+    await this.myIdentity.generateIfNeeded();
 
     setTimeout(async () => {
       // verify addr hash:
-      const decodedSigningPubKey = base64ToArrayBuffer(this.signingPubKey);
-      console.log({ decodedSigningPubKey });
-      const decodedEncryptionPubKey = base64ToArrayBuffer(this.encryptionPubKey);
-      console.log({ decodedEncryptionPubKey });
-
-      const pubKeyHash = await crypto.subtle.digest('SHA-512', concatArrayBuffer(decodedSigningPubKey, decodedEncryptionPubKey));
-      const hashAddrMatch = arrayBufferTobase64(pubKeyHash) === this.myAddr.slice(1);
-      console.log({ pubKeyHash, hashAddrMatch });
+      const hashAddrVerified = await verifyPeerAddr(
+        this.myIdentity.exportedSigningPubKey,
+        this.myIdentity.expoertedEncryptionPubKey,
+        this.myIdentity.addr,
+      );
+      console.log({ hashAddrVerified });
       
       // send signature
-      const messageToSignRaw = new Uint8Array(64);
-      crypto.getRandomValues(messageToSignRaw);
-      const signature = await crypto.subtle.sign(
-        {
-          name: this.signingKeyPair.privateKey.algorithm.name,
-          hash: { name: "SHA-384" },
-        },
-        this.signingKeyPair.privateKey,
-        messageToSignRaw,
-      );
-
-      console.log({ messageToSignRaw, signature });
+      const signature = await this.myIdentity.signature();
+      console.log({ signature });
 
       // verify signature
-      const peerSigningPubKey = await crypto.subtle.importKey(
-        'raw',
-        decodedSigningPubKey,
-        {
-          name: "ECDSA",
-          namedCurve: "P-384"
-        },
-        false,
-        ['verify'],
-      )
-      console.log({ peerSigningPubKey });
-
-      const verifyResult = await crypto.subtle.verify(
-        {
-          name: this.signingKeyPair.privateKey.algorithm.name,
-          hash: { name: "SHA-384" },
-        },
-        peerSigningPubKey,
+      const signatureVerified = await verifySignature(
+        this.myIdentity.exportedSigningPubKey,
+        this.myIdentity.expoertedEncryptionPubKey,
         signature,
-        messageToSignRaw,
       );
-      console.log({ verifyResult });
+      console.log({ signatureVerified });
     }, 1000);
   }
 
@@ -178,7 +90,7 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     if (peerAddr.match(/^wss?:\/\//)) {
       return this.connectWs(peerAddr, viaAddr, opts);
     } else {
-      return this.connectRtc(peerAddr, viaAddr, opts);
+      return this.connectUnnamed(peerAddr, viaAddr, opts);
     }
   }
 
@@ -186,7 +98,7 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     const conn = new WsConn();
     const beingConnected = opts.beingConnected || false;
     await conn.startLink({
-      myAddr: this.myAddr, peerAddr,
+      myAddr: this.myIdentity.addr, peerAddr,
       timeout: beingConnected ? this.config.newConnTimeout : this.config.requestToConnTimeout,
       beingConnected,
       connVia: this.connVia(viaAddr),
@@ -195,7 +107,7 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     this.addConn(peerAddr, conn);
   }
 
-  protected abstract connectRtc(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts): Promise<void>;
+  protected abstract connectUnnamed(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts): Promise<void>;
 
   protected addConn(peerAddr: string, conn: Conn): void {
     this.conns[peerAddr] = conn;
@@ -210,7 +122,7 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
       requestToConn: async (peerAddr: string, connId: string, offer: RTCSessionDescription) => {
         const message: RequestToConnMessage = {
           term: 'requestToConn',
-          myAddr: this.myAddr, peerAddr,
+          myAddr: this.myIdentity.addr, peerAddr,
           connId, offer,
         };
 
@@ -219,7 +131,7 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
       requestToConnResult: async (peerAddr: string, connId: string, answer: RTCSessionDescription) => {
         const message: RequestToConnResultMessage = {
           term: 'requestToConnResult',
-          myAddr: this.myAddr, peerAddr,
+          myAddr: this.myIdentity.addr, peerAddr,
           connId, answer,
           ok: true,
         };
@@ -229,7 +141,7 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
       rtcIce: async (peerAddr: string, connId: string, ice: RTCIceCandidate) => {
         const message: RtcIceMessage = {
           term: 'rtcIce',
-          myAddr: this.myAddr, peerAddr,
+          myAddr: this.myIdentity.addr, peerAddr,
           connId, ice,
         };
 

@@ -1,4 +1,4 @@
-import EventTarget, { CustomEvent } from './utils/event-target';
+import EventTarget, { CustomEvent } from './misc/event-target';
 import ConnManager from './conn-manager/base';
 
 interface ConfigMandatory {
