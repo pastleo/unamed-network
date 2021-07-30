@@ -1,5 +1,5 @@
 import EventTarget, { CustomEvent } from '../misc/event-target';
-import Identity, { verifyPeerAddr, verifySignature } from '../misc/identity';
+import Identity, { PeerIdentity } from '../misc/identity';
 import Conn, { MessageReceivedEvent } from '../conn/base';
 import WsConn from '../conn/ws';
 import RtcConn from '../conn/rtc';
@@ -12,6 +12,7 @@ import {
 
 interface RequestToConnEventDetail {
   peerAddr: string;
+  peerIdentity: PeerIdentity;
 }
 export class RequestToConnEvent extends CustomEvent<RequestToConnEventDetail> {
   type = 'request-to-conn'
@@ -62,28 +63,6 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
 
   async start(): Promise<void> {
     await this.myIdentity.generateIfNeeded();
-
-    setTimeout(async () => {
-      // verify addr hash:
-      const hashAddrVerified = await verifyPeerAddr(
-        this.myIdentity.exportedSigningPubKey,
-        this.myIdentity.expoertedEncryptionPubKey,
-        this.myIdentity.addr,
-      );
-      console.log({ hashAddrVerified });
-      
-      // send signature
-      const signature = await this.myIdentity.signature();
-      console.log({ signature });
-
-      // verify signature
-      const signatureVerified = await verifySignature(
-        this.myIdentity.exportedSigningPubKey,
-        this.myIdentity.expoertedEncryptionPubKey,
-        signature,
-      );
-      console.log({ signatureVerified });
-    }, 1000);
   }
 
   connect(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
@@ -98,7 +77,8 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     const conn = new WsConn();
     const beingConnected = opts.beingConnected || false;
     await conn.startLink({
-      myAddr: this.myIdentity.addr, peerAddr,
+      myIdentity: this.myIdentity, peerAddr,
+      peerIdentity: new PeerIdentity(peerAddr),
       timeout: beingConnected ? this.config.newConnTimeout : this.config.requestToConnTimeout,
       beingConnected,
       connVia: this.connVia(viaAddr),
@@ -119,30 +99,35 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
 
   protected connVia(viaAddr: string): Conn.Via {
     return {
-      requestToConn: async (peerAddr: string, connId: string, offer: RTCSessionDescription) => {
+      requestToConn: async (peerAddr: string, _connId: string, offer: RTCSessionDescription) => {
         const message: RequestToConnMessage = {
           term: 'requestToConn',
           myAddr: this.myIdentity.addr, peerAddr,
-          connId, offer,
+          signingPubKey: this.myIdentity.exportedSigningPubKey,
+          encryptionPubKey: this.myIdentity.expoertedEncryptionPubKey,
+          signature: await this.myIdentity.signature(),
+          offer,
         };
 
         this.send(viaAddr, message);
       },
-      requestToConnResult: async (peerAddr: string, connId: string, answer: RTCSessionDescription) => {
+      requestToConnResult: async (peerAddr: string, _connId: string, answer: RTCSessionDescription) => {
         const message: RequestToConnResultMessage = {
           term: 'requestToConnResult',
           myAddr: this.myIdentity.addr, peerAddr,
-          connId, answer,
-          ok: true,
+          signingPubKey: this.myIdentity.exportedSigningPubKey,
+          encryptionPubKey: this.myIdentity.expoertedEncryptionPubKey,
+          signature: await this.myIdentity.signature(),
+          answer, ok: true,
         };
 
         this.send(viaAddr, message);
       },
-      rtcIce: async (peerAddr: string, connId: string, ice: RTCIceCandidate) => {
+      rtcIce: async (peerAddr: string, _connId: string, ice: RTCIceCandidate) => {
         const message: RtcIceMessage = {
           term: 'rtcIce',
           myAddr: this.myIdentity.addr, peerAddr,
-          connId, ice,
+          ice, timestamp: Date.now(),
         };
 
         this.send(viaAddr, message);
@@ -168,25 +153,36 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     if (!event.defaultPrevented) {
       switch (event.detail.term) {
         case 'requestToConn':
-          return this.receiveRequestToConn(newRequestToConnMessage(event.detail), event.detail.from);
+          return this.onReceiveRequestToConn(newRequestToConnMessage(event.detail), event.detail.from);
         case 'requestToConnResult':
-          return this.receiveRequestToConnResult(newRequestToConnResultMessage(event.detail), event.detail.from);
+          return this.onReceiveRequestToConnResult(newRequestToConnResultMessage(event.detail), event.detail.from);
         case 'rtcIce':
-          return this.receiveRtcIce(newRtcIceMessage(event.detail), event.detail.from);
+          return this.onReceiveRtcIce(newRtcIceMessage(event.detail), event.detail.from);
       }
     }
   }
 
-  protected receiveRequestToConn(message: RequestToConnMessage, _fromAddr: string) {
+  protected onReceiveRequestToConn(message: RequestToConnMessage, _fromAddr: string) {
     this.send(message.peerAddr, message);
   }
 
-  protected receiveRequestToConnResult(message: RequestToConnResultMessage, _fromAddr: string) {
+  protected onReceiveRequestToConnResult(message: RequestToConnResultMessage, _fromAddr: string) {
     this.send(message.peerAddr, message);
   }
 
-  protected receiveRtcIce(message: RtcIceMessage, _fromAddr: string) {
+  protected onReceiveRtcIce(message: RtcIceMessage, _fromAddr: string) {
     this.send(message.peerAddr, message);
+  }
+
+  protected async verifyPeerIdentity(peerIdentity: PeerIdentity, signature: Identity.Signature): Promise<boolean> {
+    if (peerIdentity.addr.match(/^#/)) {
+      const hashAddrVerified = await peerIdentity.verifyUnnamedAddr();
+
+      if (!hashAddrVerified) return false;
+    }
+
+    const signatureVerified = await peerIdentity.verifySignature(signature);
+    return signatureVerified;
   }
 }
 

@@ -1,4 +1,5 @@
 import EventTarget, { CustomEvent } from '../misc/event-target';
+import Identity, { PeerIdentity } from '../misc/identity';
 import { Message, toMessage } from '../misc/message';
 import { randomStr } from '../misc/utils';
 
@@ -21,7 +22,8 @@ declare namespace Conn {
     rtcIce: (peerAddr: string, connId: string, payload?: any) => Promise<void>,
   }
   interface StartLinkOpts {
-    myAddr: string;
+    myIdentity: Identity;
+    peerIdentity: PeerIdentity;
     peerAddr: string;
     timeout: number;
     beingConnected: boolean;
@@ -29,13 +31,13 @@ declare namespace Conn {
 }
 
 abstract class Conn extends EventTarget<ConnEventMap> {
-  connId: string;
-  peerAddr: string;
+  connId: string; // preserved, might be useful in the future, difference between 2 side
+  peerIdentity: PeerIdentity;
   connected: boolean = false;
 
-  constructor(connId?: string) {
+  constructor() {
     super();
-    this.connId = connId || randomStr();
+    this.connId = randomStr();
   }
 
   abstract startLink(opts: Conn.StartLinkOpts): Promise<void>;
@@ -50,7 +52,7 @@ abstract class Conn extends EventTarget<ConnEventMap> {
   protected onMessageData(data: string) {
     const messageContent = toMessage(JSON.parse(data));
     if (messageContent) {
-      this.dispatchEvent(new MessageReceivedEvent({ ...messageContent, from: this.peerAddr }))
+      this.dispatchEvent(new MessageReceivedEvent({ ...messageContent, from: this.peerIdentity.addr }))
     }
   }
 }

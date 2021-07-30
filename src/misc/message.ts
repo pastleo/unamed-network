@@ -1,5 +1,9 @@
+import Identity from './identity';
+
 export interface Message {
   term: string;
+  // srcAddr
+  // desAddr
 }
 
 export function toMessage(data: any): Message {
@@ -10,9 +14,12 @@ export function toMessage(data: any): Message {
 
 export interface RequestToConnMessage extends Message {
   term: 'requestToConn'
-  myAddr: string;
-  peerAddr: string;
-  connId: string;
+  signingPubKey: string;
+  encryptionPubKey: string;
+  signature: Identity.Signature;
+
+  myAddr: string; // -> srcAddr
+  peerAddr: string; // -> desAddr
   offer?: RTCSessionDescription;
 }
 export function toRequestToConnMessage(data: any): RequestToConnMessage {
@@ -20,15 +27,24 @@ export function toRequestToConnMessage(data: any): RequestToConnMessage {
 }
 export function newRequestToConnMessage(data: any): RequestToConnMessage {
   if (
+    typeof data.signingPubKey === 'string' &&
+    typeof data.encryptionPubKey === 'string' &&
+    typeof data.signature.random === 'string' &&
+    typeof data.signature.sign === 'string' &&
     typeof data.myAddr === 'string' &&
-    typeof data.peerAddr === 'string' &&
-    typeof data.connId === 'string'
+    typeof data.peerAddr === 'string'
   ) {
     const message: RequestToConnMessage = {
       term: 'requestToConn',
+      signingPubKey: data.signingPubKey,
+      encryptionPubKey: data.encryptionPubKey,
+      signature: {
+        random: data.signature.random,
+        sign: data.signature.sign,
+      },
+
       myAddr: data.myAddr,
       peerAddr: data.peerAddr,
-      connId: data.connId,
     };
 
     if (typeof data.offer === 'object') {
@@ -41,9 +57,12 @@ export function newRequestToConnMessage(data: any): RequestToConnMessage {
 
 export interface RequestToConnResultMessage extends Message {
   term: 'requestToConnResult'
+  signingPubKey: string;
+  encryptionPubKey: string;
+  signature: Identity.Signature;
+
   myAddr: string;
   peerAddr: string;
-  connId: string;
   ok: boolean;
   answer?: RTCSessionDescription;
 }
@@ -52,16 +71,25 @@ export function toRequestToConnResultMessage(data: any): RequestToConnResultMess
 }
 export function newRequestToConnResultMessage(data: any): RequestToConnResultMessage {
   if (
+    typeof data.signingPubKey === 'string' &&
+    typeof data.encryptionPubKey === 'string' &&
+    typeof data.signature.random === 'string' &&
+    typeof data.signature.sign === 'string' &&
     typeof data.ok === 'boolean' &&
     typeof data.myAddr === 'string' &&
-    typeof data.peerAddr === 'string' &&
-    typeof data.connId === 'string'
+    typeof data.peerAddr === 'string'
   ) {
     const message: RequestToConnResultMessage = {
       term: 'requestToConnResult',
+      signingPubKey: data.signingPubKey,
+      encryptionPubKey: data.encryptionPubKey,
+      signature: {
+        random: data.signature.random,
+        sign: data.signature.sign,
+      },
+
       myAddr: data.myAddr,
       peerAddr: data.peerAddr,
-      connId: data.connId,
       ok: data.ok,
     };
 
@@ -77,8 +105,8 @@ export interface RtcIceMessage extends Message {
   term: 'rtcIce';
   myAddr: string;
   peerAddr: string;
-  connId: string;
   ice: RTCIceCandidate;
+  timestamp?: number;
 }
 export function toRtcIceMessage(data: any): RtcIceMessage {
   return data.term === 'rtcIce' && newRtcIceMessage(data);
@@ -87,14 +115,12 @@ export function newRtcIceMessage(data: any): RtcIceMessage {
   if (
     typeof data.myAddr === 'string' &&
     typeof data.peerAddr === 'string' &&
-    typeof data.connId === 'string' &&
     typeof data.ice === 'object'
   ) {
     return {
       term: 'rtcIce',
       myAddr: data.myAddr,
       peerAddr: data.peerAddr,
-      connId: data.connId,
       ice: data.ice as RTCIceCandidate,
     };
   }

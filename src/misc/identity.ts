@@ -95,47 +95,58 @@ class Identity {
 
 export default Identity;
 
+export class PeerIdentity {
+  addr: string;
+  private signingPubKey: ArrayBuffer;
+  private encryptionPubKey: ArrayBuffer;
+
+  constructor(peerAddr: string, peerSigningPubKeyBase64?: string, peerEncryptionPubKeyBase64?: string) {
+    this.addr = peerAddr;
+    if (peerSigningPubKeyBase64) {
+      this.setSigningPubKey(peerSigningPubKeyBase64);
+    }
+    if (peerEncryptionPubKeyBase64) {
+      this.setEncryptionPubKey(peerEncryptionPubKeyBase64);
+    }
+  }
+
+  setSigningPubKey(peerSigningPubKeyBase64: string) {
+    this.signingPubKey = base64ToArrayBuffer(peerSigningPubKeyBase64);
+  }
+  setEncryptionPubKey(peerEncryptionPubKeyBase64: string) {
+    this.encryptionPubKey = base64ToArrayBuffer(peerEncryptionPubKeyBase64);
+  }
+
+  async verifyUnnamedAddr(): Promise<boolean> {
+    const pubKeyHash = await calcUnnamedAddr(this.signingPubKey, this.encryptionPubKey);
+
+    return arrayBufferTobase64(pubKeyHash) === this.addr.slice(1);
+  }
+
+  async verifySignature(signature: Identity.Signature): Promise<boolean> {
+    const peerSigningPubKey = await crypto.subtle.importKey(
+      'raw', this.signingPubKey, SIGNING_KEY_OPTS, false, ['verify'],
+    );
+
+    const dataBeforeSigning = calcDataToBeSigned(
+      this.encryptionPubKey, base64ToArrayBuffer(signature.random),
+    );
+
+    return crypto.subtle.verify(
+      SIGNING_ALGORITHM_OPTS,
+      peerSigningPubKey,
+      base64ToArrayBuffer(signature.sign),
+      dataBeforeSigning,
+    );
+  }
+}
+
 function calcUnnamedAddr(signingPubKey: ArrayBuffer, encryptionPubKey: ArrayBuffer): Promise<ArrayBuffer> {
   return crypto.subtle.digest('SHA-512', concatArrayBuffer(signingPubKey, encryptionPubKey));
 }
 
 function calcDataToBeSigned(encryptionPubKey: ArrayBuffer, random: ArrayBuffer): ArrayBuffer {
   return concatArrayBuffer(encryptionPubKey, random);
-}
-
-export async function verifyPeerAddr(peerSigningPubKeyBase64: string, peerEncryptionPubKeyBase64: string, peerUnnamedAddr: string): Promise<boolean> {
-  const peerSigningPubKey = base64ToArrayBuffer(peerSigningPubKeyBase64);
-  const peerEncryptionPubKey = base64ToArrayBuffer(peerEncryptionPubKeyBase64);
-
-  const pubKeyHash = await calcUnnamedAddr(peerSigningPubKey, peerEncryptionPubKey);
-
-  return arrayBufferTobase64(pubKeyHash) === peerUnnamedAddr.slice(1);
-}
-
-export async function verifySignature(
-  peerSigningPubKeyBase64: string,
-  peerEncryptionPubKeyBase64: string,
-  signature: Identity.Signature,
-): Promise<boolean> {
-  const peerSigningPubKey = await crypto.subtle.importKey(
-    'raw',
-    base64ToArrayBuffer(peerSigningPubKeyBase64),
-    SIGNING_KEY_OPTS,
-    false,
-    ['verify'],
-  );
-
-  const dataBeforeSigning = calcDataToBeSigned(
-    base64ToArrayBuffer(peerEncryptionPubKeyBase64),
-    base64ToArrayBuffer(signature.random),
-  );
-
-  return crypto.subtle.verify(
-    SIGNING_ALGORITHM_OPTS,
-    peerSigningPubKey,
-    base64ToArrayBuffer(signature.sign),
-    dataBeforeSigning,
-  );
 }
 
 function arrayBufferTobase64(ab: ArrayBuffer): string {

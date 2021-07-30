@@ -1,4 +1,5 @@
 import Conn from './base';
+import { PeerIdentity } from '../misc/identity';
 import { Message } from '../misc/message';
 
 const DATA_CHANNEL_NAME = 'data';
@@ -22,6 +23,8 @@ class RtcConn extends Conn {
   
   private startLinkResolve: () => void;
 
+  private pendingIce: RTCIceCandidate[] = [];
+
   constructor(rtcConfig: RTCConfiguration = {}) {
     super();
     this.rtcConn = new RTCPeerConnection(rtcConfig);
@@ -29,11 +32,13 @@ class RtcConn extends Conn {
     this.rtcConn.oniceconnectionstatechange = () => {
       if (!this.connected) this.rtcConnMightBeReady();
     };
+
+    (window as any).rtc = this.rtcConn;
   }
 
   startLink(opts: RtcConn.StartLinkOpts): Promise<void> {
     const { peerAddr, connVia, beingConnected, timeout, offer } = opts;
-    this.peerAddr = peerAddr;
+    this.peerIdentity = opts.peerIdentity || new PeerIdentity(opts.peerAddr);
     return new Promise((resolve, reject) => {
       this.startLinkResolve = resolve;
       this.setupIceCandidate(connVia);
@@ -72,7 +77,7 @@ class RtcConn extends Conn {
   private setupIceCandidate(connVia: RtcConn.Via) {
     this.rtcConn.onicecandidate = ({ candidate }) => {
       if (candidate) {
-        connVia.rtcIce(this.peerAddr, this.connId, candidate);
+        connVia.rtcIce(this.peerIdentity.addr, this.connId, candidate);
       }
     };
   }
@@ -110,10 +115,19 @@ class RtcConn extends Conn {
 
   requestToConnResult(answer: RTCSessionDescription) {
     this.rtcConn.setRemoteDescription(answer);
+    if (this.pendingIce.length > 0) {
+      this.pendingIce.forEach(ice => {
+        this.rtcConn.addIceCandidate(ice);
+      });
+    }
   }
 
   rtcIce(ice: RTCIceCandidate) {
-    this.rtcConn.addIceCandidate(ice);
+    if (this.rtcConn.remoteDescription) {
+      this.rtcConn.addIceCandidate(ice);
+    } else {
+      this.pendingIce.push(ice);
+    }
   }
 
   async send(message: Message) {

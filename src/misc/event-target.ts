@@ -16,7 +16,7 @@ type EventTargetListeners<EventMapT> = {
 }
 
 export default class EventTarget<EventMapT> {
-  private listeners: EventTargetListeners<EventMapT> = {};
+  listeners: EventTargetListeners<EventMapT> = {};
 
   addEventListener<K extends keyof EventMapT>(type: K & string, listener: (this: EventTarget<EventMapT>, ev: EventMapT[K]) => void): void {
     if (!(type in this.listeners)) {
