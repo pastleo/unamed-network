@@ -1,7 +1,7 @@
 import Conn from './base'
 import Identity, { PeerIdentity } from '../misc/identity';
-import { Message, toRequestToConnResultMessage, RequestToConnMessage, RequestToConnResultMessage } from '../misc/message';
-import { Optional } from 'utility-types';
+import { Message, toRequestToConnResultMessage } from '../message/message';
+import { makeRequestToConnMessage, makeRequestToConnResultMessage } from '../message/conn';
 
 import NodeWebSocket from 'ws';
 // importing 'ws' node_modules when targeting browser will only get a function that throw error: ws does not work in the browser
@@ -12,10 +12,8 @@ type Ws = WebSocket | NodeWebSocket;
 type MsgEvent = MessageEvent | NodeWebSocket.MessageEvent;
 
 declare namespace WsConn {
-  interface Via extends Conn.Via {}
   interface StartLinkOpts extends Conn.StartLinkOpts {
-    connVia: WsConn.Via;
-    askToBeingConn?: boolean;
+    waitForWs?: boolean;
   }
 }
 
@@ -38,10 +36,7 @@ class WsConn extends Conn {
         }
       }, opts.timeout);
 
-      if (opts.askToBeingConn) {
-        opts.connVia.requestToConn(this.peerIdentity.addr, this.connId, {});
-        return;
-      }
+      if (opts.waitForWs) return;
 
       this.ws = new WebSocket(opts.peerAddr);
 
@@ -59,7 +54,7 @@ class WsConn extends Conn {
     });
   }
 
-  startFromExisting(ws: Ws, opts: Optional<WsConn.StartLinkOpts, 'connVia' | 'peerIdentity'>) {
+  startFromExisting(ws: Ws, opts: WsConn.StartLinkOpts) {
     this.peerIdentity = opts.peerIdentity || new PeerIdentity(opts.peerAddr);
     this.ws = ws;
     this.finishStarting();
@@ -67,15 +62,7 @@ class WsConn extends Conn {
 
   private beingConnectingFlow(peerAddr: string, myIdentity: Identity) {
     this.ws.onopen = async () => {
-      const message: RequestToConnResultMessage = {
-        term: 'requestToConnResult',
-        myAddr: myIdentity.addr, peerAddr,
-        signingPubKey: myIdentity.exportedSigningPubKey,
-        encryptionPubKey: myIdentity.expoertedEncryptionPubKey,
-        signature: await myIdentity.signature(),
-        ok: true,
-      };
-
+      const message = await makeRequestToConnResultMessage(myIdentity, peerAddr);
       this.ws.send(JSON.stringify(message));
       this.finishStarting();
     };
@@ -91,18 +78,12 @@ class WsConn extends Conn {
       this.peerIdentity.setSigningPubKey(resultMsg.signingPubKey);
       this.peerIdentity.setEncryptionPubKey(resultMsg.encryptionPubKey);
 
-      if (resultMsg.ok && await this.peerIdentity.verifySignature(resultMsg.signature)) {
+      if (await this.peerIdentity.verify(resultMsg.signature)) {
         this.finishStarting();
       }
     }
     this.ws.onopen = async () => {
-      const message: RequestToConnMessage = {
-        term: 'requestToConn',
-        myAddr: myIdentity.addr, peerAddr,
-        signingPubKey: myIdentity.exportedSigningPubKey,
-        encryptionPubKey: myIdentity.expoertedEncryptionPubKey,
-        signature: await myIdentity.signature(),
-      };
+      const message = await makeRequestToConnMessage(myIdentity, peerAddr);
 
       this.ws.send(JSON.stringify(message));
     }
@@ -126,14 +107,6 @@ class WsConn extends Conn {
       this.connStartReject();
     }
   }
-
-  // TODO
-  //onConnVia(peerAddr: string, connId: string, term: string, data: anyV {
-    //switch (term) {
-      //case 'requestToConnResult':
-        //this.onViaRequestToConnResult(
-    //}
-  //}
 
   async close() {
     this.ws.close();

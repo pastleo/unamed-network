@@ -117,9 +117,19 @@ export class PeerIdentity {
     this.encryptionPubKey = base64ToArrayBuffer(peerEncryptionPubKeyBase64);
   }
 
+  async verify(signature: Identity.Signature): Promise<boolean> {
+    if (this.addr.match(/^#/)) {
+      const hashAddrVerified = await this.verifyUnnamedAddr();
+
+      if (!hashAddrVerified) return false;
+    }
+
+    const signatureVerified = await this.verifySignature(signature);
+    return signatureVerified;
+  }
+
   async verifyUnnamedAddr(): Promise<boolean> {
     const pubKeyHash = await calcUnnamedAddr(this.signingPubKey, this.encryptionPubKey);
-
     return arrayBufferTobase64(pubKeyHash) === this.addr.slice(1);
   }
 

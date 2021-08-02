@@ -1,18 +1,14 @@
 import Conn from './base';
-import { PeerIdentity } from '../misc/identity';
-import { Message } from '../misc/message';
+import Identity, { PeerIdentity } from '../misc/identity';
+import { Message, RequestToConnResultMessage, newRequestToConnResultMessage, RtcIceMessage, newRtcIceMessage } from '../message/message';
+import { makeRequestToConnMessage, makeRequestToConnResultMessage } from '../message/conn';
+import Tunnel from '../conn/tunnel';
 
 const DATA_CHANNEL_NAME = 'data';
 const RTC_CONN_READY_STATES = ['connected', 'completed'];
 
 declare namespace RtcConn {
-  interface Via extends Conn.Via {
-    requestToConn: (peerAddr: string, connId: string, offer: RTCSessionDescription) => Promise<void>,
-    requestToConnResult: (peerAddr: string, connId: string, answer: RTCSessionDescription) => Promise<void>,
-    rtcIce: (peerAddr: string, connId: string, ice: RTCIceCandidate) => Promise<void>,
-  }
   interface StartLinkOpts extends Conn.StartLinkOpts {
-    connVia: RtcConn.Via;
     offer?: RTCSessionDescription;
   }
 }
@@ -24,6 +20,7 @@ class RtcConn extends Conn {
   private startLinkResolve: () => void;
 
   private pendingIce: RTCIceCandidate[] = [];
+  private pendingReceivedIce: RTCIceCandidate[] = [];
 
   constructor(rtcConfig: RTCConfiguration = {}) {
     super();
@@ -37,10 +34,11 @@ class RtcConn extends Conn {
   }
 
   startLink(opts: RtcConn.StartLinkOpts): Promise<void> {
-    const { peerAddr, connVia, beingConnected, timeout, offer } = opts;
+    const { myIdentity, peerAddr, connVia, beingConnected, timeout, offer } = opts;
     this.peerIdentity = opts.peerIdentity || new PeerIdentity(opts.peerAddr);
     return new Promise((resolve, reject) => {
       this.startLinkResolve = resolve;
+      this.setupConnVia(connVia);
       this.setupIceCandidate(connVia);
 
       setTimeout(() => {
@@ -50,34 +48,87 @@ class RtcConn extends Conn {
       }, timeout);
 
       if (beingConnected) {
-        this.rtcAnsweringFlow(peerAddr, connVia, offer);
+        this.rtcAnsweringFlow(peerAddr, myIdentity, connVia, offer);
       } else {
-        this.rtcOfferingFlow(peerAddr, connVia);
+        this.rtcOfferingFlow(peerAddr, myIdentity, connVia);
       }
     })
   }
 
-  private async rtcOfferingFlow(peerAddr: string, connVia: RtcConn.Via) {
+  private async rtcOfferingFlow(peerAddr: string, myIdentity: Identity, connVia: Tunnel) {
     this.setupChannel(this.rtcConn.createDataChannel(DATA_CHANNEL_NAME));
 
     await this.rtcConn.setLocalDescription(await this.rtcConn.createOffer());
     const offer = this.rtcConn.localDescription;
 
-    connVia.requestToConn(peerAddr, this.connId, offer);
+    const message = await makeRequestToConnMessage(myIdentity, peerAddr, offer);
+    connVia.send(message);
   }
 
-  private async rtcAnsweringFlow(peerAddr: string, connVia: RtcConn.Via, offer: RTCSessionDescription) {
+  private async rtcAnsweringFlow(peerAddr: string, myIdentity: Identity, connVia: Tunnel, offer: RTCSessionDescription) {
     await this.rtcConn.setRemoteDescription(offer);
     await this.rtcConn.setLocalDescription(await this.rtcConn.createAnswer());
     const answer = this.rtcConn.localDescription;
 
-    connVia.requestToConnResult(peerAddr, this.connId, answer);
+    const message = await makeRequestToConnResultMessage(myIdentity, peerAddr, answer);
+    connVia.send(message);
   }
 
-  private setupIceCandidate(connVia: RtcConn.Via) {
+  private setupConnVia(connVia: Tunnel) {
+    connVia.addEventListener('receive', event => {
+      switch (event.detail.term) {
+        case 'requestToConnResult':
+          return this.onReceiveRequestToConnResult(
+            newRequestToConnResultMessage(event.detail),
+            connVia,
+          );
+        case 'rtcIce':
+          return this.onReceiveRtcIce(
+            newRtcIceMessage(event.detail)
+          );
+      }
+    });
+  }
+
+  private async onReceiveRequestToConnResult(message: RequestToConnResultMessage, connVia: Tunnel) {
+    this.peerIdentity.setSigningPubKey(message.signingPubKey);
+    this.peerIdentity.setEncryptionPubKey(message.encryptionPubKey);
+
+    if (await this.peerIdentity.verify(message.signature)) {
+      await this.rtcConn.setRemoteDescription(message.answer);
+
+      if (this.pendingReceivedIce.length > 0) {
+        this.pendingReceivedIce.forEach(ice => {
+          this.rtcConn.addIceCandidate(ice);
+        });
+      }
+      if (this.pendingIce.length > 0) {
+        this.pendingIce.forEach(ice => {
+          connVia.send({ term: 'rtcIce', ice });
+        });
+      }
+    } else {
+      console.error(`peerIdentity '${this.peerIdentity.addr}' verification failed`);
+    }
+  }
+
+  private onReceiveRtcIce(message: RtcIceMessage) {
+    const ice = message.ice;
+    if (this.rtcConn.remoteDescription) {
+      this.rtcConn.addIceCandidate(ice);
+    } else {
+      this.pendingReceivedIce.push(ice);
+    }
+  }
+
+  private setupIceCandidate(connVia: Tunnel) {
     this.rtcConn.onicecandidate = ({ candidate }) => {
       if (candidate) {
-        connVia.rtcIce(this.peerIdentity.addr, this.connId, candidate);
+        if (this.rtcConn.remoteDescription) {
+          connVia.send({ term: 'rtcIce', ice: candidate });
+        } else {
+          this.pendingIce.push(candidate);
+        }
       }
     };
   }
@@ -111,23 +162,6 @@ class RtcConn extends Conn {
 
   private onRtcClose() {
     this.rtcConn.close();
-  }
-
-  requestToConnResult(answer: RTCSessionDescription) {
-    this.rtcConn.setRemoteDescription(answer);
-    if (this.pendingIce.length > 0) {
-      this.pendingIce.forEach(ice => {
-        this.rtcConn.addIceCandidate(ice);
-      });
-    }
-  }
-
-  rtcIce(ice: RTCIceCandidate) {
-    if (this.rtcConn.remoteDescription) {
-      this.rtcConn.addIceCandidate(ice);
-    } else {
-      this.pendingIce.push(ice);
-    }
   }
 
   async send(message: Message) {

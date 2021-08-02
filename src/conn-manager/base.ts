@@ -3,12 +3,8 @@ import Identity, { PeerIdentity } from '../misc/identity';
 import Conn, { MessageReceivedEvent } from '../conn/base';
 import WsConn from '../conn/ws';
 import RtcConn from '../conn/rtc';
-import {
-  Message,
-  RequestToConnMessage, newRequestToConnMessage,
-  RequestToConnResultMessage, newRequestToConnResultMessage,
-  RtcIceMessage, newRtcIceMessage,
-} from '../misc/message';
+import Tunnel from '../conn/tunnel';
+import { Message } from '../message/message';
 
 interface RequestToConnEventDetail {
   peerAddr: string;
@@ -22,17 +18,36 @@ export class RequestToConnEvent extends CustomEvent<RequestToConnEventDetail> {
 }
 
 interface NewConnEventDetail {
-  peerAddr: string;
   conn: Conn;
 }
 export class NewConnEvent extends CustomEvent<NewConnEventDetail> {
   type = 'new-conn'
 }
 
+interface RelayEventDetail {
+  srcAddr: string;
+  desAddr: string;
+  fromConn: Conn;
+  toConn: Conn; // conn that this message will be sent
+  message: Message;
+}
+export class RelayEvent extends CustomEvent<RelayEventDetail> {
+  type = 'relay'
+}
+
+interface NewTunnelEventDetail {
+  tunnel: Tunnel;
+}
+export class NewTunnelEvent extends CustomEvent<NewTunnelEventDetail> {
+  type = 'new-tunnel'
+}
+
 interface ConnManagerEventMap {
   'request-to-conn': RequestToConnEvent;
   'new-conn': NewConnEvent;
   'receive': MessageReceivedEvent;
+  'relay': RelayEvent;
+  'new-tunnel': NewTunnelEvent;
 }
 
 declare namespace ConnManager {
@@ -55,6 +70,8 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
   protected config: ConnManager.Config;
   myIdentity: Identity;
 
+  private tunnels: Record<string, Tunnel> = {};
+
   constructor(config: Partial<ConnManager.Config> = {}) {
     super();
     this.config = { ...configDefault, ...config };
@@ -73,19 +90,7 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     }
   }
 
-  protected async connectWs(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
-    const conn = new WsConn();
-    const beingConnected = opts.beingConnected || false;
-    await conn.startLink({
-      myIdentity: this.myIdentity, peerAddr,
-      peerIdentity: new PeerIdentity(peerAddr),
-      timeout: beingConnected ? this.config.newConnTimeout : this.config.requestToConnTimeout,
-      beingConnected,
-      connVia: this.connVia(viaAddr),
-      ...opts,
-    });
-    this.addConn(peerAddr, conn);
-  }
+  protected abstract connectWs(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts): Promise<void>;
 
   protected abstract connectUnnamed(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts): Promise<void>;
 
@@ -94,45 +99,7 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     conn.addEventListener('receive', event => {
       this.onReceive(event);
     })
-    this.dispatchEvent(new NewConnEvent({ peerAddr, conn }));
-  }
-
-  protected connVia(viaAddr: string): Conn.Via {
-    return {
-      requestToConn: async (peerAddr: string, _connId: string, offer: RTCSessionDescription) => {
-        const message: RequestToConnMessage = {
-          term: 'requestToConn',
-          myAddr: this.myIdentity.addr, peerAddr,
-          signingPubKey: this.myIdentity.exportedSigningPubKey,
-          encryptionPubKey: this.myIdentity.expoertedEncryptionPubKey,
-          signature: await this.myIdentity.signature(),
-          offer,
-        };
-
-        this.send(viaAddr, message);
-      },
-      requestToConnResult: async (peerAddr: string, _connId: string, answer: RTCSessionDescription) => {
-        const message: RequestToConnResultMessage = {
-          term: 'requestToConnResult',
-          myAddr: this.myIdentity.addr, peerAddr,
-          signingPubKey: this.myIdentity.exportedSigningPubKey,
-          encryptionPubKey: this.myIdentity.expoertedEncryptionPubKey,
-          signature: await this.myIdentity.signature(),
-          answer, ok: true,
-        };
-
-        this.send(viaAddr, message);
-      },
-      rtcIce: async (peerAddr: string, _connId: string, ice: RTCIceCandidate) => {
-        const message: RtcIceMessage = {
-          term: 'rtcIce',
-          myAddr: this.myIdentity.addr, peerAddr,
-          ice, timestamp: Date.now(),
-        };
-
-        this.send(viaAddr, message);
-      },
-    }
+    this.dispatchEvent(new NewConnEvent({ conn }));
   }
 
   send(peerAddr: string, message: Message): void {
@@ -147,42 +114,68 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     return conn;
   }
 
-  private onReceive(event: MessageReceivedEvent) {
-    this.dispatchEvent(event);
+  async createTunnel(peerAddr: string, viaAddr: string, tunnelConnId?: string): Promise<Tunnel> {
+    const tunnel = new Tunnel(this, tunnelConnId);
+    await tunnel.startLink({ peerAddr, viaAddr });
+    this.tunnels[tunnel.connId] = tunnel;
 
-    if (!event.defaultPrevented) {
-      switch (event.detail.term) {
-        case 'requestToConn':
-          return this.onReceiveRequestToConn(newRequestToConnMessage(event.detail), event.detail.from);
-        case 'requestToConnResult':
-          return this.onReceiveRequestToConnResult(newRequestToConnResultMessage(event.detail), event.detail.from);
-        case 'rtcIce':
-          return this.onReceiveRtcIce(newRtcIceMessage(event.detail), event.detail.from);
+    return tunnel;
+  }
+  closeTunnel(tunnel: Tunnel, tunnelConnId?: string) {
+    if (tunnelConnId) {
+      tunnel.setConnected(false);
+      delete this.tunnels[tunnelConnId];
+    } else {
+      tunnel.close();
+    }
+  }
+
+  private onReceive(event: MessageReceivedEvent): void {
+    const { srcAddr, desAddr } = event.detail;
+
+    if (desAddr === this.myIdentity.addr) {
+      this.dispatchEvent(event);
+
+      if (!event.defaultPrevented) {
+        this.onReceiveMessage(event);
+      }
+    } else {
+      this.onRelayMessage(srcAddr, desAddr, event);
+    }
+  }
+
+  protected async onReceiveMessage(event: MessageReceivedEvent) {
+    const { tunnelConnId } = event.detail as Tunnel.Message;
+    const tunnel = this.tunnels[tunnelConnId];
+    if (tunnel) {
+      tunnel.onReceive(event);
+    } else if (tunnelConnId) {
+      const tunnel = new Tunnel(this, tunnelConnId);
+      const newTunnelEvent = new NewTunnelEvent({ tunnel });
+      this.dispatchEvent(newTunnelEvent);
+      if (!newTunnelEvent.defaultPrevented) {
+        const { srcAddr: peerAddr } = event.detail;
+        this.tunnels[tunnel.connId] = tunnel;
+        await tunnel.startLink({ peerAddr, viaAddr: event.fromConn.peerIdentity.addr });
+        tunnel.onReceive(event);
       }
     }
   }
 
-  protected onReceiveRequestToConn(message: RequestToConnMessage, _fromAddr: string) {
-    this.send(message.peerAddr, message);
-  }
+  protected onRelayMessage(srcAddr: string, desAddr: string, event: MessageReceivedEvent) {
+    const toConn = this.conns[desAddr];
+    const relayEvent = new RelayEvent({
+      fromConn: event.fromConn,
+      toConn, srcAddr, desAddr,
+      message: event.detail,
+    });
 
-  protected onReceiveRequestToConnResult(message: RequestToConnResultMessage, _fromAddr: string) {
-    this.send(message.peerAddr, message);
-  }
+    this.dispatchEvent(relayEvent);
 
-  protected onReceiveRtcIce(message: RtcIceMessage, _fromAddr: string) {
-    this.send(message.peerAddr, message);
-  }
-
-  protected async verifyPeerIdentity(peerIdentity: PeerIdentity, signature: Identity.Signature): Promise<boolean> {
-    if (peerIdentity.addr.match(/^#/)) {
-      const hashAddrVerified = await peerIdentity.verifyUnnamedAddr();
-
-      if (!hashAddrVerified) return false;
+    if (toConn && !relayEvent.defaultPrevented) {
+      if (toConn) toConn.send(event.detail);
+      else console.warn(`desAddr '${desAddr}' not connected`);
     }
-
-    const signatureVerified = await peerIdentity.verifySignature(signature);
-    return signatureVerified;
   }
 }
 

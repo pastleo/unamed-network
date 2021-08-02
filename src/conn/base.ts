@@ -1,14 +1,17 @@
 import EventTarget, { CustomEvent } from '../misc/event-target';
 import Identity, { PeerIdentity } from '../misc/identity';
-import { Message, toMessage } from '../misc/message';
+import Tunnel from '../conn/tunnel';
+import { Message, toMessage } from '../message/message';
 import { randomStr } from '../misc/utils';
 
-interface MessageReceivedEventDetail extends Message {
-  from: string;
-}
-
-export class MessageReceivedEvent extends CustomEvent<MessageReceivedEventDetail> {
+export class MessageReceivedEvent extends CustomEvent<Message> {
   type = 'receive';
+  fromConn: Conn;
+
+  constructor(fromConn: Conn, detail: Message) {
+    super(detail);
+    this.fromConn = fromConn;
+  }
 }
 
 interface ConnEventMap {
@@ -16,17 +19,13 @@ interface ConnEventMap {
 }
 
 declare namespace Conn {
-  interface Via {
-    requestToConn: (peerAddr: string, connId: string, payload: any) => Promise<void>,
-    requestToConnResult: (peerAddr: string, connId: string, payload: any) => Promise<void>,
-    rtcIce: (peerAddr: string, connId: string, payload?: any) => Promise<void>,
-  }
   interface StartLinkOpts {
     myIdentity: Identity;
-    peerIdentity: PeerIdentity;
+    peerIdentity?: PeerIdentity;
     peerAddr: string;
     timeout: number;
-    beingConnected: boolean;
+    beingConnected?: boolean;
+    connVia?: Tunnel;
   }
 }
 
@@ -35,15 +34,12 @@ abstract class Conn extends EventTarget<ConnEventMap> {
   peerIdentity: PeerIdentity;
   connected: boolean = false;
 
-  constructor() {
+  constructor(connId?: string) {
     super();
-    this.connId = randomStr();
+    this.connId = connId || randomStr();
   }
 
-  abstract startLink(opts: Conn.StartLinkOpts): Promise<void>;
-
-  // TODO
-  //abstract onConnVia(peerAddr: string, connId: string, term: string, data: any): void;
+  abstract startLink(opts: Conn.StartLinkOpts | {[_: string]: any}): Promise<void>;
 
   abstract close(): Promise<void>;
 
@@ -52,7 +48,7 @@ abstract class Conn extends EventTarget<ConnEventMap> {
   protected onMessageData(data: string) {
     const messageContent = toMessage(JSON.parse(data));
     if (messageContent) {
-      this.dispatchEvent(new MessageReceivedEvent({ ...messageContent, from: this.peerIdentity.addr }))
+      this.dispatchEvent(new MessageReceivedEvent(this, messageContent))
     }
   }
 }

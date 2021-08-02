@@ -1,14 +1,64 @@
 import ConnManager, { RequestToConnEvent } from './base';
+import WsConn from '../conn/ws';
 import RtcConn from '../conn/rtc';
+import Tunnel from '../conn/tunnel';
 import { PeerIdentity } from '../misc/identity';
-import { RequestToConnMessage, RequestToConnResultMessage, RtcIceMessage } from '../misc/message';
+import {
+  RequestToConnMessage, newRequestToConnMessage,
+} from '../message/message';
 
 class BrowserConnManager extends ConnManager {
   private pendingRtcConns: Record<string, RtcConn> = {};
 
-  async connectUnnamed(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
+  async start() {
+    await super.start();
+    this.addEventListener('new-tunnel', event => {
+      const { tunnel } = event.detail;
+      tunnel.addEventListener('receive', event => {
+        switch (event.detail.term) {
+          case 'requestToConn':
+            return this.onReceiveRequestToConn(newRequestToConnMessage(event.detail), event.fromConn.peerIdentity.addr, tunnel);
+        }
+      });
+    });
+  }
+
+  private async onReceiveRequestToConn(message: RequestToConnMessage, fromAddr: string, connVia: Tunnel) {
+    const { srcAddr: peerAddr } = message;
+    const peerIdentity = new PeerIdentity(peerAddr, message.signingPubKey, message.encryptionPubKey);
+    if (await peerIdentity.verify(message.signature)) {
+      const event = new RequestToConnEvent({ peerAddr, peerIdentity });
+      this.dispatchEvent(event);
+
+      if (!event.defaultPrevented) {
+        this.connect(peerAddr, fromAddr, {
+          offer: message.offer,
+          beingConnected: true,
+          peerIdentity,
+          connVia,
+        });
+      }
+    }
+  }
+
+
+  protected async connectWs(peerAddr: string, _viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
+    const conn = new WsConn();
+    const beingConnected = opts.beingConnected || false;
+    await conn.startLink({
+      myIdentity: this.myIdentity, peerAddr,
+      peerIdentity: new PeerIdentity(peerAddr),
+      timeout: beingConnected ? this.config.newConnTimeout : this.config.requestToConnTimeout,
+      beingConnected,
+      ...opts,
+    });
+    this.addConn(peerAddr, conn);
+  }
+
+  protected async connectUnnamed(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
     const rtcConn = new RtcConn();
     this.pendingRtcConns[peerAddr] = rtcConn;
+    const connVia = opts.connVia || (await this.createTunnel(peerAddr, viaAddr));
 
     try {
       await rtcConn.startLink({
@@ -16,7 +66,7 @@ class BrowserConnManager extends ConnManager {
         peerIdentity: new PeerIdentity(peerAddr),
         beingConnected: false,
         timeout: this.config.requestToConnTimeout,
-        connVia: this.connVia(viaAddr),
+        connVia,
         ...opts,
       });
       this.addConn(peerAddr, rtcConn);
@@ -24,56 +74,6 @@ class BrowserConnManager extends ConnManager {
       console.error(error);
     } finally {
       delete this.pendingRtcConns[peerAddr];
-    }
-  }
-
-  protected async onReceiveRequestToConn(message: RequestToConnMessage, fromAddr: string) {
-    if (message.peerAddr === this.myIdentity.addr) {
-      const peerAddr = message.myAddr;
-
-      const peerIdentity = new PeerIdentity(peerAddr, message.signingPubKey, message.encryptionPubKey);
-      if (await this.verifyPeerIdentity(peerIdentity, message.signature)) {
-        const event = new RequestToConnEvent({ peerAddr, peerIdentity });
-        this.dispatchEvent(event);
-
-        if (!event.defaultPrevented) {
-          this.connect(peerAddr, fromAddr, {
-            offer: message.offer,
-            beingConnected: true,
-            peerIdentity,
-          });
-        }
-      }
-    } else {
-      this.send(message.peerAddr, message);
-    }
-  }
-
-  protected async onReceiveRequestToConnResult(message: RequestToConnResultMessage, _fromAddr: string) {
-    if (message.peerAddr === this.myIdentity.addr) {
-      const peerAddr = message.myAddr;
-      const pendingConn = this.pendingRtcConns[peerAddr];
-
-      pendingConn.peerIdentity.setSigningPubKey(message.signingPubKey);
-      pendingConn.peerIdentity.setEncryptionPubKey(message.encryptionPubKey);
-
-      if (pendingConn && (await this.verifyPeerIdentity(pendingConn.peerIdentity, message.signature))) {
-        pendingConn.requestToConnResult(message.answer);
-      }
-    } else {
-      this.send(message.peerAddr, message);
-    }
-  }
-
-  protected onReceiveRtcIce(message: RtcIceMessage, _fromAddr: string) {
-    if (message.peerAddr === this.myIdentity.addr) {
-      const peerAddr = message.myAddr;
-      const pendingConn = this.pendingRtcConns[peerAddr];
-      if (pendingConn) {
-        pendingConn.rtcIce(message.ice);
-      }
-    } else {
-      this.send(message.peerAddr, message);
     }
   }
 }

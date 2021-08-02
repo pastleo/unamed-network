@@ -1,15 +1,25 @@
-import Identity from './identity';
+import Identity from '../misc/identity';
 
 export interface Message {
   term: string;
-  // srcAddr
-  // desAddr
+  srcAddr: string;
+  desAddr: string;
 }
+type MessageAddrs = Pick<Message, 'srcAddr' | 'desAddr'>;
+type MessageData = Message & { [_: string]: any }
 
 export function toMessage(data: any): Message {
-  if (typeof data.term === 'string') {
+  if (
+    typeof data.term === 'string' &&
+    typeof data.srcAddr === 'string' &&
+    typeof data.desAddr === 'string'
+  ) {
     return data
   }
+}
+
+function messageAddrs(data: MessageData): MessageAddrs {
+  return { srcAddr: data.srcAddr, desAddr: data.desAddr };
 }
 
 export interface RequestToConnMessage extends Message {
@@ -18,33 +28,27 @@ export interface RequestToConnMessage extends Message {
   encryptionPubKey: string;
   signature: Identity.Signature;
 
-  myAddr: string; // -> srcAddr
-  peerAddr: string; // -> desAddr
   offer?: RTCSessionDescription;
 }
-export function toRequestToConnMessage(data: any): RequestToConnMessage {
+export function toRequestToConnMessage(data: MessageData): RequestToConnMessage {
   return data.term === 'requestToConn' && newRequestToConnMessage(data);
 }
-export function newRequestToConnMessage(data: any): RequestToConnMessage {
+export function newRequestToConnMessage(data: MessageData): RequestToConnMessage {
   if (
     typeof data.signingPubKey === 'string' &&
     typeof data.encryptionPubKey === 'string' &&
     typeof data.signature.random === 'string' &&
-    typeof data.signature.sign === 'string' &&
-    typeof data.myAddr === 'string' &&
-    typeof data.peerAddr === 'string'
+    typeof data.signature.sign === 'string'
   ) {
     const message: RequestToConnMessage = {
       term: 'requestToConn',
+      ...messageAddrs(data),
       signingPubKey: data.signingPubKey,
       encryptionPubKey: data.encryptionPubKey,
       signature: {
         random: data.signature.random,
         sign: data.signature.sign,
       },
-
-      myAddr: data.myAddr,
-      peerAddr: data.peerAddr,
     };
 
     if (typeof data.offer === 'object') {
@@ -61,36 +65,27 @@ export interface RequestToConnResultMessage extends Message {
   encryptionPubKey: string;
   signature: Identity.Signature;
 
-  myAddr: string;
-  peerAddr: string;
-  ok: boolean;
   answer?: RTCSessionDescription;
 }
-export function toRequestToConnResultMessage(data: any): RequestToConnResultMessage {
+export function toRequestToConnResultMessage(data: MessageData): RequestToConnResultMessage {
   return data.term === 'requestToConnResult' && newRequestToConnResultMessage(data);
 }
-export function newRequestToConnResultMessage(data: any): RequestToConnResultMessage {
+export function newRequestToConnResultMessage(data: MessageData): RequestToConnResultMessage {
   if (
     typeof data.signingPubKey === 'string' &&
     typeof data.encryptionPubKey === 'string' &&
     typeof data.signature.random === 'string' &&
-    typeof data.signature.sign === 'string' &&
-    typeof data.ok === 'boolean' &&
-    typeof data.myAddr === 'string' &&
-    typeof data.peerAddr === 'string'
+    typeof data.signature.sign === 'string'
   ) {
     const message: RequestToConnResultMessage = {
       term: 'requestToConnResult',
+      ...messageAddrs(data),
       signingPubKey: data.signingPubKey,
       encryptionPubKey: data.encryptionPubKey,
       signature: {
         random: data.signature.random,
         sign: data.signature.sign,
       },
-
-      myAddr: data.myAddr,
-      peerAddr: data.peerAddr,
-      ok: data.ok,
     };
 
     if (typeof data.answer === 'object') {
@@ -103,24 +98,18 @@ export function newRequestToConnResultMessage(data: any): RequestToConnResultMes
 
 export interface RtcIceMessage extends Message {
   term: 'rtcIce';
-  myAddr: string;
-  peerAddr: string;
   ice: RTCIceCandidate;
-  timestamp?: number;
 }
-export function toRtcIceMessage(data: any): RtcIceMessage {
+export function toRtcIceMessage(data: MessageData): RtcIceMessage {
   return data.term === 'rtcIce' && newRtcIceMessage(data);
 }
-export function newRtcIceMessage(data: any): RtcIceMessage {
+export function newRtcIceMessage(data: MessageData): RtcIceMessage {
   if (
-    typeof data.myAddr === 'string' &&
-    typeof data.peerAddr === 'string' &&
     typeof data.ice === 'object'
   ) {
     return {
       term: 'rtcIce',
-      myAddr: data.myAddr,
-      peerAddr: data.peerAddr,
+      ...messageAddrs(data),
       ice: data.ice as RTCIceCandidate,
     };
   }
@@ -130,13 +119,17 @@ export interface PingMessage extends Message {
   term: 'ping'
   timestamp: number
 }
-export function toPingMessage(data: any): PingMessage {
+export function toPingMessage(data: MessageData): PingMessage {
   return data.term === 'ping' && newPingMessage(data);
 }
-export function newPingMessage(data: any): PingMessage {
+export function newPingMessage(data: MessageData): PingMessage {
   if (
     typeof data.timestamp === 'number'
   ) {
-    return { term: 'ping', timestamp: data.timestamp };
+    return {
+      term: 'ping',
+      ...messageAddrs(data),
+      timestamp: data.timestamp,
+    };
   }
 }
