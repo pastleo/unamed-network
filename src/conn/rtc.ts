@@ -5,7 +5,6 @@ import { makeRequestToConnMessage, makeRequestToConnResultMessage } from '../mes
 import Tunnel from '../conn/tunnel';
 
 const DATA_CHANNEL_NAME = 'data';
-const RTC_CONN_READY_STATES = ['connected', 'completed'];
 
 declare namespace RtcConn {
   interface StartLinkOpts extends Conn.StartLinkOpts {
@@ -18,6 +17,7 @@ class RtcConn extends Conn {
   private rtcDataChannel: RTCDataChannel;
   
   private startLinkResolve: () => void;
+  private startLinkReject: () => void;
 
   private pendingIce: RTCIceCandidate[] = [];
   private pendingReceivedIce: RTCIceCandidate[] = [];
@@ -27,7 +27,7 @@ class RtcConn extends Conn {
     this.rtcConn = new RTCPeerConnection(rtcConfig);
     this.rtcConn.ondatachannel = ({ channel }) => this.setupChannel(channel);
     this.rtcConn.oniceconnectionstatechange = () => {
-      if (!this.connected) this.rtcConnMightBeReady();
+      this.checkRtcConnState();
     };
 
     (window as any).rtc = this.rtcConn;
@@ -38,12 +38,14 @@ class RtcConn extends Conn {
     this.peerIdentity = opts.peerIdentity || new PeerIdentity(opts.peerAddr);
     return new Promise((resolve, reject) => {
       this.startLinkResolve = resolve;
+      this.startLinkReject = reject;
       this.setupConnVia(connVia);
       this.setupIceCandidate(connVia);
 
       setTimeout(() => {
-        if (!this.connected) {
-          reject();
+        if (this.state !== Conn.State.CONNECTED) {
+          console.warn('conn/rtc.ts: startLink: timeout');
+          this.startLinkReject();
         }
       }, timeout);
 
@@ -143,25 +145,37 @@ class RtcConn extends Conn {
           };
           break;
       }
-      this.rtcConnMightBeReady();
+      this.checkRtcConnState();
     };
-    channel.onclose = () => this.onRtcClose();
   }
 
-  private rtcConnMightBeReady() {
-    if (
-      !this.connected &&
-      RTC_CONN_READY_STATES.indexOf(this.rtcConn.iceConnectionState) !== -1 &&
-      this.rtcDataChannel &&
-      this.rtcDataChannel.readyState === 'open'
-    ) {
-      this.connected = true;
-      this.startLinkResolve();
+  private checkRtcConnState() {
+    if (this.state === Conn.State.NOT_CONNECTED) {
+      if (
+        ['connected', 'completed'].indexOf(
+          this.rtcConn.iceConnectionState
+        ) >= 0 &&
+        this.rtcDataChannel &&
+        this.rtcDataChannel.readyState === 'open'
+      ) {
+        this.state = Conn.State.CONNECTED;
+        this.startLinkResolve();
+      } else if (
+        this.rtcConn.iceConnectionState === 'failed'
+      ) {
+        this.state = Conn.State.FAILED;
+        this.startLinkReject();
+      }
+    } else if (this.state === Conn.State.CONNECTED) {
+      if (
+        ['disconnected', 'closed', 'failed'].indexOf(
+          this.rtcConn.iceConnectionState
+        ) >= 0
+      ) {
+        this.state = Conn.State.CLOSED;
+        this.onClose({ conn: this, bySelf: false });
+      }
     }
-  }
-
-  private onRtcClose() {
-    this.rtcConn.close();
   }
 
   async send(message: Message) {
@@ -170,6 +184,7 @@ class RtcConn extends Conn {
 
   async close() {
     this.rtcConn.close();
+    this.onClose({ conn: this, bySelf: true });
   }
 }
 

@@ -27,7 +27,7 @@ class Tunnel extends Conn {
   async startLink(opts: Tunnel.StartLinkOpts): Promise<void> {
     this.peerIdentity = new PeerIdentity(opts.peerAddr);
     this.viaAddr = opts.viaAddr;
-    this.connected = true;
+    this.state = Conn.State.CONNECTED;
   }
 
   onReceive(event: MessageReceivedEvent) {
@@ -55,7 +55,7 @@ class Tunnel extends Conn {
   }
 
   setConnected(connected: boolean) {
-    this.connected = connected;
+    this.state = connected ? Conn.State.CONNECTED : Conn.State.CLOSED;
   }
 }
 

@@ -28,11 +28,9 @@ const connManager = new WssConnManager({
   });
   connManager.addEventListener('receive', event => {
     console.log('receive', event.detail);
-    //try {
-      //throw new Error('oops');
-    //} catch(e) {
-      //console.log(e);
-    //}
+  });
+  connManager.addEventListener('close', event => {
+    console.log('close', event);
   });
 
   repl.start({ prompt: '> ' });

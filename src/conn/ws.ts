@@ -23,15 +23,19 @@ class WsConn extends Conn {
   private connStartResolve: () => void = () => {};
   private connStartReject: () => void = () => {};
   private pendingMessages: string[] = [];
+  private closing: boolean = false;
 
   startLink(opts: WsConn.StartLinkOpts): Promise<void> {
     return new Promise((resolve, reject) => {
       this.peerIdentity = opts.peerIdentity || new PeerIdentity(opts.peerAddr);
       this.connStartResolve = resolve;
-      this.connStartReject = reject;
+      this.connStartReject = () => {
+        this.state = Conn.State.FAILED;
+        reject();
+      };
 
       setTimeout(() => {
-        if (!this.connected) {
+        if (this.state !== Conn.State.CONNECTED) {
           this.connStartReject();
         }
       }, opts.timeout);
@@ -52,12 +56,6 @@ class WsConn extends Conn {
         this.connectingFlow(opts.peerAddr, opts.myIdentity);
       }
     });
-  }
-
-  startFromExisting(ws: Ws, opts: WsConn.StartLinkOpts) {
-    this.peerIdentity = opts.peerIdentity || new PeerIdentity(opts.peerAddr);
-    this.ws = ws;
-    this.finishStarting();
   }
 
   private beingConnectingFlow(peerAddr: string, myIdentity: Identity) {
@@ -89,10 +87,22 @@ class WsConn extends Conn {
     }
   }
 
+  startFromExisting(ws: Ws, opts: Pick<WsConn.StartLinkOpts, 'peerIdentity'>) {
+    if (opts.peerIdentity) {
+      this.peerIdentity = opts.peerIdentity;
+    }
+    this.ws = ws;
+    this.finishStarting();
+  }
+
   private finishStarting() {
-    this.connected = true;
+    this.state = Conn.State.CONNECTED;
     this.ws.onmessage = (message: MsgEvent) => {
       this.onMessageData(message.data.toString());
+    }
+    this.ws.onclose = (wsEvent: CloseEvent) => {
+      this.state = Conn.State.CLOSED;
+      this.onClose({ wsEvent, conn: this, bySelf: this.closing });
     }
     this.connStartResolve();
     queueMicrotask(() => {
@@ -102,13 +112,8 @@ class WsConn extends Conn {
     });
   }
 
-  requestToConnResult(ok: boolean) {
-    if (!ok) {
-      this.connStartReject();
-    }
-  }
-
   async close() {
+    this.closing = true;
     this.ws.close();
   }
 

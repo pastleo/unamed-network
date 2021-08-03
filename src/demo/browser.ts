@@ -23,6 +23,9 @@ const connManager = new BrowserConnManager();
   connManager.addEventListener('receive', event => {
     console.log('receive', event.detail);
   });
+  connManager.addEventListener('close', event => {
+    console.log('close', event);
+  });
 
   await connManager.connect('ws://localhost:8081', '');
 })();

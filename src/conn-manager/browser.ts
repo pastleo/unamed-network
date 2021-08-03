@@ -64,7 +64,6 @@ class BrowserConnManager extends ConnManager {
       await rtcConn.startLink({
         myIdentity: this.myIdentity, peerAddr,
         peerIdentity: new PeerIdentity(peerAddr),
-        beingConnected: false,
         timeout: this.config.requestToConnTimeout,
         connVia,
         ...opts,

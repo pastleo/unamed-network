@@ -14,8 +14,19 @@ export class MessageReceivedEvent extends CustomEvent<Message> {
   }
 }
 
+interface CloseEventDetail {
+  conn: Conn;
+  bySelf: boolean;
+  wsEvent?: CloseEvent
+}
+
+export class ConnCloseEvent extends CustomEvent<CloseEventDetail> {
+  type = 'close'
+}
+
 interface ConnEventMap {
-  'receive': MessageReceivedEvent
+  'receive': MessageReceivedEvent;
+  'close': ConnCloseEvent;
 }
 
 declare namespace Conn {
@@ -27,12 +38,19 @@ declare namespace Conn {
     beingConnected?: boolean;
     connVia?: Tunnel;
   }
+
+  export const enum State {
+    NOT_CONNECTED = 'NOT_CONNECTED',
+    CONNECTED = 'CONNECTED',
+    FAILED = 'FAILED',
+    CLOSED = 'CLOSED',
+  }
 }
 
 abstract class Conn extends EventTarget<ConnEventMap> {
   connId: string; // preserved, might be useful in the future, difference between 2 side
   peerIdentity: PeerIdentity;
-  connected: boolean = false;
+  state: Conn.State = Conn.State.NOT_CONNECTED;
 
   constructor(connId?: string) {
     super();
@@ -50,6 +68,10 @@ abstract class Conn extends EventTarget<ConnEventMap> {
     if (messageContent) {
       this.dispatchEvent(new MessageReceivedEvent(this, messageContent))
     }
+  }
+
+  protected onClose(detail: CloseEventDetail) {
+    this.dispatchEvent(new ConnCloseEvent(detail));
   }
 }
 

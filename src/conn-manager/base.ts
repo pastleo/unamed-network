@@ -1,6 +1,6 @@
 import EventTarget, { CustomEvent } from '../misc/event-target';
 import Identity, { PeerIdentity } from '../misc/identity';
-import Conn, { MessageReceivedEvent } from '../conn/base';
+import Conn, { MessageReceivedEvent, ConnCloseEvent } from '../conn/base';
 import WsConn from '../conn/ws';
 import RtcConn from '../conn/rtc';
 import Tunnel from '../conn/tunnel';
@@ -19,20 +19,21 @@ export class RequestToConnEvent extends CustomEvent<RequestToConnEventDetail> {
 
 interface NewConnEventDetail {
   conn: Conn;
+  reconnected: boolean;
 }
 export class NewConnEvent extends CustomEvent<NewConnEventDetail> {
   type = 'new-conn'
 }
 
-interface RelayEventDetail {
+interface RouteEventDetail {
   srcAddr: string;
   desAddr: string;
   fromConn: Conn;
   toConn: Conn; // conn that this message will be sent
   message: Message;
 }
-export class RelayEvent extends CustomEvent<RelayEventDetail> {
-  type = 'relay'
+export class RouteEvent extends CustomEvent<RouteEventDetail> {
+  type = 'route'
 }
 
 interface NewTunnelEventDetail {
@@ -45,8 +46,9 @@ export class NewTunnelEvent extends CustomEvent<NewTunnelEventDetail> {
 interface ConnManagerEventMap {
   'request-to-conn': RequestToConnEvent;
   'new-conn': NewConnEvent;
+  'close': ConnCloseEvent;
   'receive': MessageReceivedEvent;
-  'relay': RelayEvent;
+  'route': RouteEvent;
   'new-tunnel': NewTunnelEvent;
 }
 
@@ -83,6 +85,9 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
   }
 
   connect(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
+    if (peerAddr in this.conns) {
+      console.warn(`Peer '${peerAddr}' already connected, original conn will be closed`);
+    }
     if (peerAddr.match(/^wss?:\/\//)) {
       return this.connectWs(peerAddr, viaAddr, opts);
     } else {
@@ -94,24 +99,16 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
 
   protected abstract connectUnnamed(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts): Promise<void>;
 
-  protected addConn(peerAddr: string, conn: Conn): void {
-    this.conns[peerAddr] = conn;
-    conn.addEventListener('receive', event => {
-      this.onReceive(event);
-    })
-    this.dispatchEvent(new NewConnEvent({ conn }));
-  }
-
-  send(peerAddr: string, message: Message): void {
-    this.getConn(peerAddr).send(message);
-  }
-
   getConn(peerAddr: string): Conn {
     const conn = this.conns[peerAddr];
     if (!conn) {
       throw new Error(`conn not found for ${peerAddr}`);
     }
     return conn;
+  }
+
+  send(peerAddr: string, message: Message): void {
+    this.getConn(peerAddr).send(message);
   }
 
   async createTunnel(peerAddr: string, viaAddr: string, tunnelConnId?: string): Promise<Tunnel> {
@@ -121,6 +118,7 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
 
     return tunnel;
   }
+
   closeTunnel(tunnel: Tunnel, tunnelConnId?: string) {
     if (tunnelConnId) {
       tunnel.setConnected(false);
@@ -128,6 +126,27 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     } else {
       tunnel.close();
     }
+  }
+
+  protected addConn(peerAddr: string, conn: Conn): void {
+    const reconnected = peerAddr in this.conns;
+    if (reconnected) {
+      this.conns[peerAddr].close();
+    }
+
+    this.conns[peerAddr] = conn;
+
+    conn.addEventListener('receive', event => {
+      this.onReceive(event);
+    });
+    conn.addEventListener('close', event => {
+      this.dispatchEvent(event);
+      if (conn.connId === this.conns[peerAddr].connId) { // prevent reconnect closing delete new connection
+        delete this.conns[peerAddr];
+      }
+    });
+
+    this.dispatchEvent(new NewConnEvent({ conn, reconnected }));
   }
 
   private onReceive(event: MessageReceivedEvent): void {
@@ -140,7 +159,7 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
         this.onReceiveMessage(event);
       }
     } else {
-      this.onRelayMessage(srcAddr, desAddr, event);
+      this.onRouteMessage(srcAddr, desAddr, event);
     }
   }
 
@@ -162,17 +181,17 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     }
   }
 
-  protected onRelayMessage(srcAddr: string, desAddr: string, event: MessageReceivedEvent) {
+  protected onRouteMessage(srcAddr: string, desAddr: string, event: MessageReceivedEvent) {
     const toConn = this.conns[desAddr];
-    const relayEvent = new RelayEvent({
+    const routeEvent = new RouteEvent({
       fromConn: event.fromConn,
       toConn, srcAddr, desAddr,
       message: event.detail,
     });
 
-    this.dispatchEvent(relayEvent);
+    this.dispatchEvent(routeEvent);
 
-    if (toConn && !relayEvent.defaultPrevented) {
+    if (toConn && !routeEvent.defaultPrevented) {
       if (toConn) toConn.send(event.detail);
       else console.warn(`desAddr '${desAddr}' not connected`);
     }
