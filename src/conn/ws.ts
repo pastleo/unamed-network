@@ -27,7 +27,7 @@ class WsConn extends Conn {
 
   startLink(opts: WsConn.StartLinkOpts): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.peerIdentity = opts.peerIdentity || new PeerIdentity(opts.peerAddr);
+      this.peerIdentity = opts.peerIdentity || new PeerIdentity(opts.peerPath);
       this.connStartResolve = resolve;
       this.connStartReject = () => {
         this.state = Conn.State.FAILED;
@@ -42,7 +42,7 @@ class WsConn extends Conn {
 
       if (opts.waitForWs) return;
 
-      this.ws = new WebSocket(opts.peerAddr);
+      this.ws = new WebSocket(this.peerIdentity.addr);
 
       this.ws.onerror = (error: any) => {
         console.error('ws.ts: ws.onerror', error);
@@ -51,22 +51,22 @@ class WsConn extends Conn {
 
       if (opts.beingConnected) {
         // being connected from wss -> browser: wss ask browser to connect
-        this.beingConnectingFlow(opts.peerAddr, opts.myIdentity);
+        this.beingConnectingFlow(opts.peerPath, opts.myIdentity);
       } else {
-        this.connectingFlow(opts.peerAddr, opts.myIdentity);
+        this.connectingFlow(opts.peerPath, opts.myIdentity);
       }
     });
   }
 
-  private beingConnectingFlow(peerAddr: string, myIdentity: Identity) {
+  private beingConnectingFlow(peerPath: string, myIdentity: Identity) {
     this.ws.onopen = async () => {
-      const message = await makeRequestToConnResultMessage(myIdentity, peerAddr);
+      const message = await makeRequestToConnResultMessage(myIdentity, peerPath);
       this.ws.send(JSON.stringify(message));
       this.finishStarting();
     };
   }
 
-  private connectingFlow(peerAddr: string, myIdentity: Identity) {
+  private connectingFlow(peerPath: string, myIdentity: Identity) {
     this.ws.onmessage = async (message: MsgEvent) => {
       this.ws.onmessage = (message: MsgEvent) => {
         this.pendingMessages.push(message.data.toString());
@@ -81,7 +81,7 @@ class WsConn extends Conn {
       }
     }
     this.ws.onopen = async () => {
-      const message = await makeRequestToConnMessage(myIdentity, peerAddr);
+      const message = await makeRequestToConnMessage(myIdentity, peerPath);
 
       this.ws.send(JSON.stringify(message));
     }

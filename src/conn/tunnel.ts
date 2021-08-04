@@ -2,21 +2,25 @@ import Conn, { MessageReceivedEvent } from './base';
 import ConnManager from '../conn-manager/base';
 import { PeerIdentity } from '../misc/identity';
 import { Message as OriMessage } from '../message/message';
+import { extractAddrFromPath } from '../misc/utils';
 
 declare namespace Tunnel {
-  type MessageData = Omit<OriMessage, 'srcAddr' | 'desAddr'> & { [_: string]: any }
+  type MessageData = Omit<OriMessage, 'srcPath' | 'desPath'> & { [_: string]: any }
   interface Message extends OriMessage {
     tunnelConnId: string;
   }
 
   interface StartLinkOpts {
-    peerAddr: string;
-    viaAddr: string; // TODO
+    peerPath: string;
+    myPath?: string;
+    viaAddr: string; // TODO: remove, Router should handle this
   }
 }
 
 class Tunnel extends Conn {
   private connManager: ConnManager;
+  private peerPath: string;
+  private myPath: string;
   private viaAddr: string;
 
   constructor(connManager: ConnManager, tunnelConnId?: string) {
@@ -25,15 +29,23 @@ class Tunnel extends Conn {
   }
 
   async startLink(opts: Tunnel.StartLinkOpts): Promise<void> {
-    this.peerIdentity = new PeerIdentity(opts.peerAddr);
+    this.peerPath = opts.peerPath;
+    this.peerIdentity = new PeerIdentity(opts.peerPath);
     this.viaAddr = opts.viaAddr;
+    if (opts.myPath) {
+      this.myPath = opts.myPath;
+    } else {
+      this.myPath = this.connManager.myIdentity.addr;
+    }
+
     this.state = Conn.State.CONNECTED;
   }
 
   onReceive(event: MessageReceivedEvent) {
     const detail = event.detail as Tunnel.Message;
+    const srcAddr = extractAddrFromPath(detail.srcPath);
     if (
-      detail.srcAddr === this.peerIdentity.addr &&
+      srcAddr === this.peerIdentity.addr &&
       detail.tunnelConnId === this.connId
     ) {
       this.dispatchEvent(event);
@@ -42,8 +54,8 @@ class Tunnel extends Conn {
 
   send(messageContent: Tunnel.MessageData) {
     const message: Tunnel.Message = {
-      srcAddr: this.connManager.myIdentity.addr,
-      desAddr: this.peerIdentity.addr,
+      srcPath: this.myPath,
+      desPath: this.peerPath,
       tunnelConnId: this.connId,
       ...messageContent,
     }

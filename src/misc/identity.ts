@@ -1,4 +1,5 @@
 import crypto from 'isomorphic-webcrypto';
+import { arrayBufferTobase64, base64ToArrayBuffer, extractAddrFromPath } from './utils';
 
 declare namespace Identity {
   interface Config {
@@ -100,8 +101,8 @@ export class PeerIdentity {
   private signingPubKey: ArrayBuffer;
   private encryptionPubKey: ArrayBuffer;
 
-  constructor(peerAddr: string, peerSigningPubKeyBase64?: string, peerEncryptionPubKeyBase64?: string) {
-    this.addr = peerAddr;
+  constructor(peerPath: string, peerSigningPubKeyBase64?: string, peerEncryptionPubKeyBase64?: string) {
+    this.addr = extractAddrFromPath(peerPath);
     if (peerSigningPubKeyBase64) {
       this.setSigningPubKey(peerSigningPubKeyBase64);
     }
@@ -157,14 +158,6 @@ function calcUnnamedAddr(signingPubKey: ArrayBuffer, encryptionPubKey: ArrayBuff
 
 function calcDataToBeSigned(encryptionPubKey: ArrayBuffer, random: ArrayBuffer): ArrayBuffer {
   return concatArrayBuffer(encryptionPubKey, random);
-}
-
-function arrayBufferTobase64(ab: ArrayBuffer): string {
-  return btoa(String.fromCharCode.apply(null, new Uint8Array(ab)));
-}
-
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  return Uint8Array.from(atob(base64), c => c.charCodeAt(0))
 }
 
 function concatArrayBuffer(ab1: ArrayBuffer, ab2: ArrayBuffer): ArrayBuffer {

@@ -1,10 +1,10 @@
 import ConnManager, { RequestToConnEvent } from './base';
 import WsConn from '../conn/ws';
 import WebSocket, { Server as WebSocketServer, ServerOptions as WsServerOptions } from 'ws';
-import Tunnel from '../conn/tunnel';
 import { PeerIdentity } from '../misc/identity';
 import { Message, toMessage, newRequestToConnMessage, newRequestToConnResultMessage } from '../message/message';
 import { makeRequestToConnMessage, makeRequestToConnResultMessage } from '../message/conn';
+import { extractAddrFromPath } from '../misc/utils';
 
 declare namespace WssConnManager {
   type ServerOptions = WsServerOptions
@@ -62,22 +62,22 @@ class WssConnManager extends ConnManager {
   private async onNewConnSentRequestToConn(ws: WebSocket, message: Message): Promise<boolean> {
     const requestToConnMessage = newRequestToConnMessage(message);
     if (requestToConnMessage) {
-      const { srcAddr: peerAddr } = requestToConnMessage;
+      const { srcPath: peerPath } = requestToConnMessage;
       const peerIdentity = new PeerIdentity(
-        peerAddr,
+        peerPath,
         requestToConnMessage.signingPubKey,
         requestToConnMessage.encryptionPubKey,
       );
 
       if (await peerIdentity.verify(requestToConnMessage.signature)) {
-        const event = new RequestToConnEvent({ peerAddr, peerIdentity });
+        const event = new RequestToConnEvent({ peerPath, peerIdentity });
         this.dispatchEvent(event);
 
         if (!event.defaultPrevented) {
-          if (peerAddr.match(/^wss?:\/\//)) {
-            return this.onNewConnSentRequestToConnByWs(ws, peerAddr);
+          if (event.peerAddr.match(/^wss?:\/\//)) {
+            return this.onNewConnSentRequestToConnByWs(ws, peerPath, peerIdentity);
           } else {
-            return this.onNewConnSentRequestToConnByUnnamed(ws, peerAddr, peerIdentity);
+            return this.onNewConnSentRequestToConnByUnnamed(ws, peerPath, peerIdentity);
           }
         }
       }
@@ -86,25 +86,26 @@ class WssConnManager extends ConnManager {
     return false;
   }
 
-  private async onNewConnSentRequestToConnByWs(ws: WebSocket, peerAddr: string): Promise<boolean> {
+  private async onNewConnSentRequestToConnByWs(ws: WebSocket, peerPath: string, peerIdentity: PeerIdentity): Promise<boolean> {
     ws.close();
     const conn = new WsConn();
     await conn.startLink({
-      myIdentity: this.myIdentity, peerAddr,
+      myIdentity: this.myIdentity, peerPath,
+      peerIdentity,
       beingConnected: true,
       timeout: this.config.newConnTimeout
     });
-    this.addConn(peerAddr, conn);
+    this.addConn(peerIdentity.addr, conn);
     return true;
   }
 
-  private async onNewConnSentRequestToConnByUnnamed(ws: WebSocket, peerAddr: string, peerIdentity: PeerIdentity): Promise<boolean> {
-    const message = await makeRequestToConnResultMessage(this.myIdentity, peerAddr);
+  private async onNewConnSentRequestToConnByUnnamed(ws: WebSocket, peerPath: string, peerIdentity: PeerIdentity): Promise<boolean> {
+    const message = await makeRequestToConnResultMessage(this.myIdentity, peerPath);
     ws.send(JSON.stringify(message));
 
     const conn = new WsConn();
     conn.startFromExisting(ws, { peerIdentity });
-    this.addConn(peerAddr, conn);
+    this.addConn(peerIdentity.addr, conn);
 
     return true;
   }
@@ -112,7 +113,8 @@ class WssConnManager extends ConnManager {
   private async onNewConnSentRequestToConnResult(ws: WebSocket, message: Message): Promise<boolean> {
     const requestToConnResultMessage = newRequestToConnResultMessage(message);
     if (requestToConnResultMessage) {
-      const { srcAddr: peerAddr } = requestToConnResultMessage;
+      const { srcPath: peerPath } = requestToConnResultMessage;
+      const peerAddr = extractAddrFromPath(peerPath);
       const conn = this.pendingWsConns[peerAddr];
 
       if (conn) {
@@ -133,20 +135,21 @@ class WssConnManager extends ConnManager {
     return false;
   }
 
-  protected async connectWs(peerAddr: string, _viaAddr: string, _opts: ConnManager.ConnectOpts = {}): Promise<void> {
+  protected async connectWs(peerPath: string, _viaAddr: string, _opts: ConnManager.ConnectOpts = {}): Promise<void> {
     const conn = new WsConn();
-    this.pendingWsConns[peerAddr] = conn;
+    const peerIdentity = new PeerIdentity(peerPath);
+    this.pendingWsConns[peerIdentity.addr] = conn;
 
     conn.startLink({
-      myIdentity: this.myIdentity, peerAddr,
-      peerIdentity: new PeerIdentity(peerAddr),
+      myIdentity: this.myIdentity, peerPath,
+      peerIdentity,
       waitForWs: true,
       timeout: this.config.requestToConnTimeout,
     });
 
-    const ws = new WebSocket(peerAddr);
+    const ws = new WebSocket(peerIdentity.addr);
     ws.onopen = async () => {
-      ws.send(JSON.stringify(await makeRequestToConnMessage(this.myIdentity, peerAddr)));
+      ws.send(JSON.stringify(await makeRequestToConnMessage(this.myIdentity, peerPath)));
     };
 
     setTimeout(() => {
@@ -154,19 +157,20 @@ class WssConnManager extends ConnManager {
     }, this.config.requestToConnTimeout);
   }
 
-  protected async connectUnnamed(peerAddr: string, viaAddr: string): Promise<void> {
+  protected async connectUnnamed(peerPath: string, viaAddr: string): Promise<void> {
     const conn = new WsConn();
-    this.pendingWsConns[peerAddr] = conn;
+    const peerIdentity = new PeerIdentity(peerPath);
+    this.pendingWsConns[peerIdentity.addr] = conn;
 
     const startLinkPromise = conn.startLink({
-      peerAddr, myIdentity: this.myIdentity,
-      peerIdentity: new PeerIdentity(peerAddr),
+      myIdentity: this.myIdentity, peerPath,
+      peerIdentity,
       timeout: this.config.requestToConnTimeout,
       waitForWs: true,
     });
 
-    const connVia = await this.createTunnel(peerAddr, viaAddr);
-    connVia.send(await makeRequestToConnMessage(this.myIdentity, peerAddr));
+    const connVia = await this.createTunnel(peerPath, viaAddr);
+    connVia.send(await makeRequestToConnMessage(this.myIdentity, peerPath));
 
     await startLinkPromise;
   }

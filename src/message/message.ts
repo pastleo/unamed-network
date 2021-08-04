@@ -2,24 +2,24 @@ import Identity from '../misc/identity';
 
 export interface Message {
   term: string;
-  srcAddr: string;
-  desAddr: string;
+  srcPath: string;
+  desPath: string;
 }
-type MessageAddrs = Pick<Message, 'srcAddr' | 'desAddr'>;
+type MessageAddrs = Pick<Message, 'srcPath' | 'desPath'>;
 type MessageData = Message & { [_: string]: any }
 
 export function toMessage(data: any): Message {
   if (
     typeof data.term === 'string' &&
-    typeof data.srcAddr === 'string' &&
-    typeof data.desAddr === 'string'
+    typeof data.srcPath === 'string' &&
+    typeof data.desPath === 'string'
   ) {
     return data
   }
 }
 
 function messageAddrs(data: MessageData): MessageAddrs {
-  return { srcAddr: data.srcAddr, desAddr: data.desAddr };
+  return { srcPath: data.srcPath, desPath: data.desPath };
 }
 
 export interface RequestToConnMessage extends Message {

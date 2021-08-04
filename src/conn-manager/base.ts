@@ -5,13 +5,19 @@ import WsConn from '../conn/ws';
 import RtcConn from '../conn/rtc';
 import Tunnel from '../conn/tunnel';
 import { Message } from '../message/message';
+import { extractAddrFromPath } from '../misc/utils';
 
 interface RequestToConnEventDetail {
-  peerAddr: string;
+  peerPath: string;
   peerIdentity: PeerIdentity;
 }
 export class RequestToConnEvent extends CustomEvent<RequestToConnEventDetail> {
   type = 'request-to-conn'
+  peerAddr: string;
+  constructor(detail: RequestToConnEventDetail) {
+    super(detail);
+    this.peerAddr = extractAddrFromPath(detail.peerPath);
+  }
   reject() {
     this.defaultPrevented = false;
   }
@@ -25,17 +31,6 @@ export class NewConnEvent extends CustomEvent<NewConnEventDetail> {
   type = 'new-conn'
 }
 
-interface RouteEventDetail {
-  srcAddr: string;
-  desAddr: string;
-  fromConn: Conn;
-  toConn: Conn; // conn that this message will be sent
-  message: Message;
-}
-export class RouteEvent extends CustomEvent<RouteEventDetail> {
-  type = 'route'
-}
-
 interface NewTunnelEventDetail {
   tunnel: Tunnel;
 }
@@ -43,13 +38,25 @@ export class NewTunnelEvent extends CustomEvent<NewTunnelEventDetail> {
   type = 'new-tunnel'
 }
 
+interface RouteEventDetail {
+  srcPath: string;
+  desPath: string;
+  fromConn: Conn;
+  directToConn: Conn; // conn in connManager.conns that this message can be directly sent
+  message: Message;
+}
+export class RouteEvent extends CustomEvent<RouteEventDetail> {
+  type = 'route'
+  toConn?: Conn; // set this from network layer decision for link layer (connManager)
+}
+
 interface ConnManagerEventMap {
   'request-to-conn': RequestToConnEvent;
   'new-conn': NewConnEvent;
   'close': ConnCloseEvent;
   'receive': MessageReceivedEvent;
-  'route': RouteEvent;
   'new-tunnel': NewTunnelEvent;
+  'route': RouteEvent;
 }
 
 declare namespace ConnManager {
@@ -84,20 +91,21 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     await this.myIdentity.generateIfNeeded();
   }
 
-  connect(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
+  connect(peerPath: string, viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
+    const peerAddr = extractAddrFromPath(peerPath);
     if (peerAddr in this.conns) {
       console.warn(`Peer '${peerAddr}' already connected, original conn will be closed`);
     }
     if (peerAddr.match(/^wss?:\/\//)) {
-      return this.connectWs(peerAddr, viaAddr, opts);
+      return this.connectWs(peerPath, viaAddr, opts);
     } else {
-      return this.connectUnnamed(peerAddr, viaAddr, opts);
+      return this.connectUnnamed(peerPath, viaAddr, opts);
     }
   }
 
-  protected abstract connectWs(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts): Promise<void>;
+  protected abstract connectWs(peerPath: string, viaAddr: string, opts: ConnManager.ConnectOpts): Promise<void>;
 
-  protected abstract connectUnnamed(peerAddr: string, viaAddr: string, opts: ConnManager.ConnectOpts): Promise<void>;
+  protected abstract connectUnnamed(peerPath: string, viaAddr: string, opts: ConnManager.ConnectOpts): Promise<void>;
 
   getConn(peerAddr: string): Conn {
     const conn = this.conns[peerAddr];
@@ -111,9 +119,9 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
     this.getConn(peerAddr).send(message);
   }
 
-  async createTunnel(peerAddr: string, viaAddr: string, tunnelConnId?: string): Promise<Tunnel> {
+  async createTunnel(peerPath: string, viaAddr: string, tunnelConnId?: string): Promise<Tunnel> {
     const tunnel = new Tunnel(this, tunnelConnId);
-    await tunnel.startLink({ peerAddr, viaAddr });
+    await tunnel.startLink({ peerPath, viaAddr });
     this.tunnels[tunnel.connId] = tunnel;
 
     return tunnel;
@@ -150,16 +158,17 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
   }
 
   private onReceive(event: MessageReceivedEvent): void {
-    const { srcAddr, desAddr } = event.detail;
+    const { srcPath, desPath } = event.detail;
 
-    if (desAddr === this.myIdentity.addr) {
+    // TODO: what if this client is not in the dirname?
+    if (event.desAddr === this.myIdentity.addr) {
       this.dispatchEvent(event);
 
       if (!event.defaultPrevented) {
         this.onReceiveMessage(event);
       }
     } else {
-      this.onRouteMessage(srcAddr, desAddr, event);
+      this.onRouteMessage(srcPath, desPath, event);
     }
   }
 
@@ -173,27 +182,29 @@ abstract class ConnManager extends EventTarget<ConnManagerEventMap> {
       const newTunnelEvent = new NewTunnelEvent({ tunnel });
       this.dispatchEvent(newTunnelEvent);
       if (!newTunnelEvent.defaultPrevented) {
-        const { srcAddr: peerAddr } = event.detail;
+        const { srcPath: peerPath } = event.detail;
         this.tunnels[tunnel.connId] = tunnel;
-        await tunnel.startLink({ peerAddr, viaAddr: event.fromConn.peerIdentity.addr });
+        await tunnel.startLink({ peerPath, viaAddr: event.fromConn.peerIdentity.addr });
         tunnel.onReceive(event);
       }
     }
   }
 
-  protected onRouteMessage(srcAddr: string, desAddr: string, event: MessageReceivedEvent) {
-    const toConn = this.conns[desAddr];
+  protected onRouteMessage(srcPath: string, desPath: string, event: MessageReceivedEvent) {
+    const directToConn = this.conns[event.desAddr];
     const routeEvent = new RouteEvent({
       fromConn: event.fromConn,
-      toConn, srcAddr, desAddr,
+      directToConn, srcPath, desPath,
       message: event.detail,
     });
 
     this.dispatchEvent(routeEvent);
 
-    if (toConn && !routeEvent.defaultPrevented) {
+    const toConn = routeEvent.toConn || directToConn;
+    
+    if (!routeEvent.defaultPrevented) {
       if (toConn) toConn.send(event.detail);
-      else console.warn(`desAddr '${desAddr}' not connected`);
+      else console.warn(`desAddr '${event.desAddr}' (path: '${desPath}') not connected`);
     }
   }
 }

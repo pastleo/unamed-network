@@ -18,6 +18,7 @@ class RtcConn extends Conn {
   
   private startLinkResolve: () => void;
   private startLinkReject: () => void;
+  private pendingMessages: string[] = [];
 
   private pendingIce: RTCIceCandidate[] = [];
   private pendingReceivedIce: RTCIceCandidate[] = [];
@@ -34,8 +35,8 @@ class RtcConn extends Conn {
   }
 
   startLink(opts: RtcConn.StartLinkOpts): Promise<void> {
-    const { myIdentity, peerAddr, connVia, beingConnected, timeout, offer } = opts;
-    this.peerIdentity = opts.peerIdentity || new PeerIdentity(opts.peerAddr);
+    const { myIdentity, peerPath, connVia, beingConnected, timeout, offer } = opts;
+    this.peerIdentity = opts.peerIdentity || new PeerIdentity(peerPath);
     return new Promise((resolve, reject) => {
       this.startLinkResolve = resolve;
       this.startLinkReject = reject;
@@ -50,29 +51,29 @@ class RtcConn extends Conn {
       }, timeout);
 
       if (beingConnected) {
-        this.rtcAnsweringFlow(peerAddr, myIdentity, connVia, offer);
+        this.rtcAnsweringFlow(peerPath, myIdentity, connVia, offer);
       } else {
-        this.rtcOfferingFlow(peerAddr, myIdentity, connVia);
+        this.rtcOfferingFlow(peerPath, myIdentity, connVia);
       }
     })
   }
 
-  private async rtcOfferingFlow(peerAddr: string, myIdentity: Identity, connVia: Tunnel) {
+  private async rtcOfferingFlow(peerPath: string, myIdentity: Identity, connVia: Tunnel) {
     this.setupChannel(this.rtcConn.createDataChannel(DATA_CHANNEL_NAME));
 
     await this.rtcConn.setLocalDescription(await this.rtcConn.createOffer());
     const offer = this.rtcConn.localDescription;
 
-    const message = await makeRequestToConnMessage(myIdentity, peerAddr, offer);
+    const message = await makeRequestToConnMessage(myIdentity, peerPath, offer);
     connVia.send(message);
   }
 
-  private async rtcAnsweringFlow(peerAddr: string, myIdentity: Identity, connVia: Tunnel, offer: RTCSessionDescription) {
+  private async rtcAnsweringFlow(peerPath: string, myIdentity: Identity, connVia: Tunnel, offer: RTCSessionDescription) {
     await this.rtcConn.setRemoteDescription(offer);
     await this.rtcConn.setLocalDescription(await this.rtcConn.createAnswer());
     const answer = this.rtcConn.localDescription;
 
-    const message = await makeRequestToConnResultMessage(myIdentity, peerAddr, answer);
+    const message = await makeRequestToConnResultMessage(myIdentity, peerPath, answer);
     connVia.send(message);
   }
 
@@ -141,7 +142,7 @@ class RtcConn extends Conn {
         case DATA_CHANNEL_NAME:
           this.rtcDataChannel = channel;
           this.rtcDataChannel.onmessage = ({ data }) => {
-            this.onMessageData(data);
+            this.pendingMessages.push(data.toString());
           };
           break;
       }
@@ -158,8 +159,7 @@ class RtcConn extends Conn {
         this.rtcDataChannel &&
         this.rtcDataChannel.readyState === 'open'
       ) {
-        this.state = Conn.State.CONNECTED;
-        this.startLinkResolve();
+        this.finishStarting();
       } else if (
         this.rtcConn.iceConnectionState === 'failed'
       ) {
@@ -176,6 +176,19 @@ class RtcConn extends Conn {
         this.onClose({ conn: this, bySelf: false });
       }
     }
+  }
+
+  private finishStarting() {
+    this.state = Conn.State.CONNECTED;
+    this.rtcDataChannel.onmessage = ({ data }) => {
+      this.onMessageData(data);
+    }
+    this.startLinkResolve();
+    queueMicrotask(() => {
+      this.pendingMessages.forEach(msg => {
+        this.onMessageData(msg);
+      });
+    });
   }
 
   async send(message: Message) {

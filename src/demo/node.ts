@@ -1,4 +1,4 @@
-//import Agent from 'unnamed-network/agent';
+import Agent from 'unnamed-network/agent';
 import WssConnManager from 'unnamed-network/conn-manager/wss';
 import repl from 'repl';
 import { PingMessage } from '../message/message';
@@ -12,6 +12,9 @@ const connManager = new WssConnManager({
 }, serverOpts);
 (global as any).cm = connManager;
 
+const agent = new Agent(connManager);
+(global as any).agent = agent;
+
 (async () => {
   await connManager.start();
   console.log('connManager started');
@@ -20,8 +23,8 @@ const connManager = new WssConnManager({
     console.log('new-conn', event.detail.conn.peerIdentity.addr);
 
     const message: PingMessage = {
-      srcAddr: connManager.myIdentity.addr,
-      desAddr: event.detail.conn.peerIdentity.addr,
+      srcPath: connManager.myIdentity.addr,
+      desPath: event.detail.conn.peerIdentity.addr,
       term: 'ping', timestamp: Date.now(),
     };
     event.detail.conn.send(message);

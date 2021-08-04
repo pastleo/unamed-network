@@ -3,10 +3,10 @@ import {
   RequestToConnMessage, RequestToConnResultMessage
 } from './message';
 
-export async function makeRequestToConnMessage(myIdentity: Identity, peerAddr: string, offer?: RTCSessionDescription): Promise<RequestToConnMessage> {
+export async function makeRequestToConnMessage(myIdentity: Identity, peerPath: string, offer?: RTCSessionDescription): Promise<RequestToConnMessage> {
   return {
     term: 'requestToConn',
-    srcAddr: myIdentity.addr, desAddr: peerAddr,
+    srcPath: myIdentity.addr, desPath: peerPath,
     signingPubKey: myIdentity.exportedSigningPubKey,
     encryptionPubKey: myIdentity.expoertedEncryptionPubKey,
     signature: await myIdentity.signature(),
@@ -14,10 +14,10 @@ export async function makeRequestToConnMessage(myIdentity: Identity, peerAddr: s
   };
 }
 
-export async function makeRequestToConnResultMessage(myIdentity: Identity, peerAddr: string, answer?: RTCSessionDescription): Promise<RequestToConnResultMessage> {
+export async function makeRequestToConnResultMessage(myIdentity: Identity, peerPath: string, answer?: RTCSessionDescription): Promise<RequestToConnResultMessage> {
   return {
     term: 'requestToConnResult',
-    srcAddr: myIdentity.addr, desAddr: peerAddr,
+    srcPath: myIdentity.addr, desPath: peerPath,
     signingPubKey: myIdentity.exportedSigningPubKey,
     encryptionPubKey: myIdentity.expoertedEncryptionPubKey,
     signature: await myIdentity.signature(),

@@ -3,14 +3,19 @@ import Identity, { PeerIdentity } from '../misc/identity';
 import Tunnel from '../conn/tunnel';
 import { Message, toMessage } from '../message/message';
 import { randomStr } from '../misc/utils';
+import { extractAddrFromPath } from '../misc/utils';
 
 export class MessageReceivedEvent extends CustomEvent<Message> {
   type = 'receive';
   fromConn: Conn;
+  srcAddr: string;
+  desAddr: string;
 
   constructor(fromConn: Conn, detail: Message) {
     super(detail);
     this.fromConn = fromConn;
+    this.srcAddr = extractAddrFromPath(detail.srcPath);
+    this.desAddr = extractAddrFromPath(detail.desPath);
   }
 }
 
@@ -33,7 +38,7 @@ declare namespace Conn {
   interface StartLinkOpts {
     myIdentity: Identity;
     peerIdentity?: PeerIdentity;
-    peerAddr: string;
+    peerPath: string;
     timeout: number;
     beingConnected?: boolean;
     connVia?: Tunnel;
