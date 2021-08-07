@@ -1,4 +1,5 @@
 import Identity from '../misc/identity';
+import { randomStr } from '../misc/utils';
 
 export interface Message {
   term: string;
@@ -96,6 +97,19 @@ export function newRequestToConnResultMessage(data: MessageData): RequestToConnR
   }
 }
 
+export interface NetworkMessage extends Message {
+  ttl: number;
+  msgId: string;
+}
+export function deriveNetworkMessage(message: Message, initTtl: number = 10): NetworkMessage {
+  const { ttl, msgId } = message as NetworkMessage;
+  return {
+    ...message,
+    ttl: (ttl ?? initTtl) - 1,
+    msgId: msgId ?? randomStr(),
+  }
+}
+
 export interface RtcIceMessage extends Message {
   term: 'rtcIce';
   ice: RTCIceCandidate;
@@ -132,4 +146,8 @@ export function newPingMessage(data: MessageData): PingMessage {
       timestamp: data.timestamp,
     };
   }
+}
+
+export interface FindNodeMessage extends Message {
+  term: 'find-node'
 }

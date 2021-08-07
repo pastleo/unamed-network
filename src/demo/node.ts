@@ -10,15 +10,12 @@ if (process.env.PORT) serverOpts.port = parseInt(process.env.PORT);
 const connManager = new WssConnManager({
   myAddr: process.env.ADDR || 'ws://localhost:8081',
 }, serverOpts);
-(global as any).cm = connManager;
 
 const agent = new Agent(connManager);
 (global as any).agent = agent;
 
 (async () => {
-  await connManager.start();
-  console.log('connManager started');
-
+  // DEV monitor:
   connManager.addEventListener('new-conn', event => {
     console.log('new-conn', event.detail.conn.peerIdentity.addr);
 
@@ -35,6 +32,10 @@ const agent = new Agent(connManager);
   connManager.addEventListener('close', event => {
     console.log('close', event);
   });
+  // =====
+
+  await agent.start();
+  console.log('agent started', agent.connManager.myIdentity.addr);
 
   repl.start({ prompt: '> ' });
 })();

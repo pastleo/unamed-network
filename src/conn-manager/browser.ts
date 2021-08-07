@@ -54,7 +54,7 @@ class BrowserConnManager extends ConnManager {
       beingConnected,
       ...opts,
     });
-    this.addConn(conn.peerIdentity.addr, conn);
+    this.addConn(conn.peerIdentity.addr, conn, peerPath);
   }
 
   protected async connectUnnamed(peerPath: string, viaAddr: string, opts: ConnManager.ConnectOpts = {}): Promise<void> {
@@ -71,7 +71,7 @@ class BrowserConnManager extends ConnManager {
         connVia,
         ...opts,
       });
-      this.addConn(peerAddr, rtcConn);
+      this.addConn(peerAddr, rtcConn, peerPath);
     } catch (error) {
       console.error(error);
     } finally {

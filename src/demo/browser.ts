@@ -4,14 +4,11 @@ import BrowserConnManager from 'unnamed-network/conn-manager/browser';
 import { PingMessage } from '../message/message';
 
 const connManager = new BrowserConnManager();
-(window as any).cm = connManager;
 const agent = new Agent(connManager);
 (window as any).agent = agent;
 
 (async () => {
-  await connManager.start();
-  console.log('connManager started', connManager.myIdentity.addr);
-
+  // DEV monitor:
   connManager.addEventListener('new-conn', event => {
     console.log('new-conn', event.detail.conn.peerIdentity.addr);
 
@@ -28,6 +25,10 @@ const agent = new Agent(connManager);
   connManager.addEventListener('close', event => {
     console.log('close', event);
   });
+  // =====
+
+  await agent.start();
+  console.log('agent started', agent.connManager.myIdentity.addr);
 
   await connManager.connect('ws://localhost:8081', '');
 })();

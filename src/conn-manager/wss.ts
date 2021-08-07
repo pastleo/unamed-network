@@ -95,7 +95,7 @@ class WssConnManager extends ConnManager {
       beingConnected: true,
       timeout: this.config.newConnTimeout
     });
-    this.addConn(peerIdentity.addr, conn);
+    this.addConn(peerIdentity.addr, conn, peerPath);
     return true;
   }
 
@@ -105,7 +105,7 @@ class WssConnManager extends ConnManager {
 
     const conn = new WsConn();
     conn.startFromExisting(ws, { peerIdentity });
-    this.addConn(peerIdentity.addr, conn);
+    this.addConn(peerIdentity.addr, conn, peerPath);
 
     return true;
   }
@@ -125,7 +125,7 @@ class WssConnManager extends ConnManager {
 
         if (await conn.peerIdentity.verify(requestToConnResultMessage.signature)) {
           conn.startFromExisting(ws, {});
-          this.addConn(peerAddr, conn);
+          this.addConn(peerAddr, conn, peerPath);
 
           return true;
         }

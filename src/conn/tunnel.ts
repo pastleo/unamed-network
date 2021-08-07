@@ -8,6 +8,7 @@ declare namespace Tunnel {
   type MessageData = Omit<OriMessage, 'srcPath' | 'desPath'> & { [_: string]: any }
   interface Message extends OriMessage {
     tunnelConnId: string;
+    // TODO: add ttl
   }
 
   interface StartLinkOpts {
@@ -59,7 +60,7 @@ class Tunnel extends Conn {
       tunnelConnId: this.connId,
       ...messageContent,
     }
-    this.connManager.send(this.viaAddr, message);
+    this.connManager.send(message);
   }
 
   async close(): Promise<void> {
@@ -72,3 +73,54 @@ class Tunnel extends Conn {
 }
 
 export default Tunnel;
+
+declare namespace TunnelThroughs {
+  type tunnelConnId = string;
+  type path = string;
+  type peerAddr = string;
+
+  type ConnIdToThroughs = Record<tunnelConnId, Record<path, peerAddr>>;
+  export const enum Type { RECEIVE = 'RECEIVE', SEND = 'SEND' }
+}
+
+class TunnelThroughs {
+  private connIdToThroughs: TunnelThroughs.ConnIdToThroughs = {};
+
+  cache(peerAddr: string, message: OriMessage, type: TunnelThroughs.Type): void {
+    const { tunnelConnId } = message as Tunnel.Message;
+    if (tunnelConnId) {
+      let path;
+      switch (type) {
+        case TunnelThroughs.Type.RECEIVE:
+          path = message.srcPath;
+          break;
+        case TunnelThroughs.Type.SEND:
+          path = message.desPath;
+          break;
+        default:
+          return;
+      }
+      if (path === peerAddr) return;
+
+      let through = this.connIdToThroughs[tunnelConnId];
+      if (!through) {
+        through = {};
+        this.connIdToThroughs[tunnelConnId] = through;
+      }
+
+      if (!through[path] && Object.values(through).length < 2) {
+        through[path] = peerAddr;
+      }
+    }
+  }
+
+  find(path: string, message: OriMessage): TunnelThroughs.peerAddr | null {
+    const { tunnelConnId } = message as Tunnel.Message;
+
+    if (tunnelConnId) {
+      return this.connIdToThroughs[tunnelConnId]?.[path];
+    }
+  }
+}
+
+export { TunnelThroughs };

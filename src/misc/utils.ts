@@ -1,3 +1,4 @@
+import crypto from 'isomorphic-webcrypto';
 
 export function randomStr(): string {
   return Math.floor(Math.random() * Date.now()).toString(36);
@@ -13,4 +14,9 @@ export function base64ToArrayBuffer(base64: string): ArrayBuffer {
 
 export function extractAddrFromPath(path: string): string {
   return path.split('>').slice(-1)[0];
+}
+
+export async function calcAddrOrSubSpaceHash(addrOrSubSpace: string): Promise<Uint32Array> {
+  const hash = await crypto.subtle.digest('SHA-512', (new TextEncoder()).encode(addrOrSubSpace));
+  return new Uint32Array(hash);
 }
