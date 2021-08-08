@@ -1,8 +1,6 @@
 import Agent from 'unnamed-network/agent';
 import BrowserConnManager from 'unnamed-network/conn-manager/browser';
 
-import { PingMessage } from '../message/message';
-
 const connManager = new BrowserConnManager();
 const agent = new Agent(connManager);
 (window as any).agent = agent;
@@ -12,12 +10,9 @@ const agent = new Agent(connManager);
   connManager.addEventListener('new-conn', event => {
     console.log('new-conn', event.detail.conn.peerIdentity.addr);
 
-    const message: PingMessage = {
-      srcPath: connManager.myIdentity.addr,
-      desPath: event.detail.conn.peerIdentity.addr,
+    agent.send(event.detail.conn.peerIdentity.addr, {
       term: 'ping', timestamp: Date.now(),
-    };
-    event.detail.conn.send(message);
+    });
   });
   connManager.addEventListener('receive', event => {
     console.log('receive', event.detail);
@@ -28,8 +23,8 @@ const agent = new Agent(connManager);
   // =====
 
   await agent.start();
-  console.log('agent started', agent.connManager.myIdentity.addr);
+  console.log('agent started', agent.myIdentity.addr);
 
-  await connManager.connect('ws://localhost:8081', '');
+  await agent.connect('ws://localhost:8081');
 })();
 

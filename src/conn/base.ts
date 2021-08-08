@@ -1,6 +1,5 @@
 import EventTarget, { CustomEvent } from '../misc/event-target';
 import Identity, { PeerIdentity } from '../misc/identity';
-import Tunnel from '../conn/tunnel';
 import { Message, toMessage } from '../message/message';
 import { randomStr } from '../misc/utils';
 import { extractAddrFromPath } from '../misc/utils';
@@ -41,7 +40,6 @@ declare namespace Conn {
     peerPath: string;
     timeout: number;
     beingConnected?: boolean;
-    connVia?: Tunnel;
   }
 
   export const enum State {

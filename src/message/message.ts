@@ -7,7 +7,7 @@ export interface Message {
   desPath: string;
 }
 type MessageAddrs = Pick<Message, 'srcPath' | 'desPath'>;
-type MessageData = Message & { [_: string]: any }
+export type MessageData = Message & { [_: string]: any }
 
 export function toMessage(data: any): Message {
   if (
@@ -150,4 +150,9 @@ export function newPingMessage(data: MessageData): PingMessage {
 
 export interface FindNodeMessage extends Message {
   term: 'find-node'
+}
+
+export interface FindNodeResponseMessage extends Message {
+  term: 'find-node-response'
+
 }

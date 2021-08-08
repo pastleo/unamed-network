@@ -2,12 +2,13 @@ import Conn from './base';
 import Identity, { PeerIdentity } from '../misc/identity';
 import { Message, RequestToConnResultMessage, newRequestToConnResultMessage, RtcIceMessage, newRtcIceMessage } from '../message/message';
 import { makeRequestToConnMessage, makeRequestToConnResultMessage } from '../message/conn';
-import Tunnel from '../conn/tunnel';
+import { TunnelConn } from '../tunnel';
 
 const DATA_CHANNEL_NAME = 'data';
 
 declare namespace RtcConn {
   interface StartLinkOpts extends Conn.StartLinkOpts {
+    connVia: TunnelConn;
     offer?: RTCSessionDescription;
   }
 }
@@ -58,7 +59,7 @@ class RtcConn extends Conn {
     })
   }
 
-  private async rtcOfferingFlow(peerPath: string, myIdentity: Identity, connVia: Tunnel) {
+  private async rtcOfferingFlow(peerPath: string, myIdentity: Identity, connVia: TunnelConn) {
     this.setupChannel(this.rtcConn.createDataChannel(DATA_CHANNEL_NAME));
 
     await this.rtcConn.setLocalDescription(await this.rtcConn.createOffer());
@@ -68,7 +69,7 @@ class RtcConn extends Conn {
     connVia.send(message);
   }
 
-  private async rtcAnsweringFlow(peerPath: string, myIdentity: Identity, connVia: Tunnel, offer: RTCSessionDescription) {
+  private async rtcAnsweringFlow(peerPath: string, myIdentity: Identity, connVia: TunnelConn, offer: RTCSessionDescription) {
     await this.rtcConn.setRemoteDescription(offer);
     await this.rtcConn.setLocalDescription(await this.rtcConn.createAnswer());
     const answer = this.rtcConn.localDescription;
@@ -77,7 +78,7 @@ class RtcConn extends Conn {
     connVia.send(message);
   }
 
-  private setupConnVia(connVia: Tunnel) {
+  private setupConnVia(connVia: TunnelConn) {
     connVia.addEventListener('receive', event => {
       switch (event.detail.term) {
         case 'requestToConnResult':
@@ -93,7 +94,7 @@ class RtcConn extends Conn {
     });
   }
 
-  private async onReceiveRequestToConnResult(message: RequestToConnResultMessage, connVia: Tunnel) {
+  private async onReceiveRequestToConnResult(message: RequestToConnResultMessage, connVia: TunnelConn) {
     this.peerIdentity.setSigningPubKey(message.signingPubKey);
     this.peerIdentity.setEncryptionPubKey(message.encryptionPubKey);
 
@@ -124,7 +125,7 @@ class RtcConn extends Conn {
     }
   }
 
-  private setupIceCandidate(connVia: Tunnel) {
+  private setupIceCandidate(connVia: TunnelConn) {
     this.rtcConn.onicecandidate = ({ candidate }) => {
       if (candidate) {
         if (this.rtcConn.remoteDescription) {

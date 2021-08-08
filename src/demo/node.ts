@@ -7,11 +7,11 @@ const serverOpts: WssConnManager.ServerOptions = {};
 if (process.env.HOST) serverOpts.host = process.env.HOST;
 if (process.env.PORT) serverOpts.port = parseInt(process.env.PORT);
 
-const connManager = new WssConnManager({
-  myAddr: process.env.ADDR || 'ws://localhost:8081',
-}, serverOpts);
+const connManager = new WssConnManager({}, serverOpts);
 
-const agent = new Agent(connManager);
+const agent = new Agent(connManager, {
+  myAddr: process.env.ADDR || 'ws://localhost:8081',
+});
 (global as any).agent = agent;
 
 (async () => {
@@ -19,12 +19,9 @@ const agent = new Agent(connManager);
   connManager.addEventListener('new-conn', event => {
     console.log('new-conn', event.detail.conn.peerIdentity.addr);
 
-    const message: PingMessage = {
-      srcPath: connManager.myIdentity.addr,
-      desPath: event.detail.conn.peerIdentity.addr,
+    agent.send(event.detail.conn.peerIdentity.addr, {
       term: 'ping', timestamp: Date.now(),
-    };
-    event.detail.conn.send(message);
+    });
   });
   connManager.addEventListener('receive', event => {
     console.log('receive', event.detail);
@@ -35,7 +32,7 @@ const agent = new Agent(connManager);
   // =====
 
   await agent.start();
-  console.log('agent started', agent.connManager.myIdentity.addr);
+  console.log('agent started', agent.myIdentity.addr);
 
   repl.start({ prompt: '> ' });
 })();

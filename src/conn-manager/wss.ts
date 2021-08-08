@@ -1,3 +1,4 @@
+import Agent from '../agent';
 import ConnManager, { RequestToConnEvent } from './base';
 import WsConn from '../conn/ws';
 import WebSocket, { Server as WebSocketServer, ServerOptions as WsServerOptions } from 'ws';
@@ -11,6 +12,7 @@ declare namespace WssConnManager {
 }
 
 class WssConnManager extends ConnManager {
+  private agent: Agent;
   private server: WebSocketServer;
   private serverOpts: WssConnManager.ServerOptions;
 
@@ -21,10 +23,10 @@ class WssConnManager extends ConnManager {
     this.serverOpts = opts;
   }
 
-  async start() {
-    await super.start();
+  async start(agent: Agent) {
+    this.agent = agent;
 
-    const { hostname, port } = new URL(this.myIdentity.addr);
+    const { hostname, port } = new URL(this.agent.myIdentity.addr);
     this.serverOpts = {
       host: hostname, port: parseInt(port),
       ...this.serverOpts,
@@ -90,7 +92,7 @@ class WssConnManager extends ConnManager {
     ws.close();
     const conn = new WsConn();
     await conn.startLink({
-      myIdentity: this.myIdentity, peerPath,
+      myIdentity: this.agent.myIdentity, peerPath,
       peerIdentity,
       beingConnected: true,
       timeout: this.config.newConnTimeout
@@ -100,7 +102,7 @@ class WssConnManager extends ConnManager {
   }
 
   private async onNewConnSentRequestToConnByUnnamed(ws: WebSocket, peerPath: string, peerIdentity: PeerIdentity): Promise<boolean> {
-    const message = await makeRequestToConnResultMessage(this.myIdentity, peerPath);
+    const message = await makeRequestToConnResultMessage(this.agent.myIdentity, peerPath);
     ws.send(JSON.stringify(message));
 
     const conn = new WsConn();
@@ -135,13 +137,13 @@ class WssConnManager extends ConnManager {
     return false;
   }
 
-  protected async connectWs(peerPath: string, _viaAddr: string, _opts: ConnManager.ConnectOpts = {}): Promise<void> {
+  protected async connectWs(peerPath: string, _opts: ConnManager.ConnectOptsImpl): Promise<void> {
     const conn = new WsConn();
     const peerIdentity = new PeerIdentity(peerPath);
     this.pendingWsConns[peerIdentity.addr] = conn;
 
     conn.startLink({
-      myIdentity: this.myIdentity, peerPath,
+      myIdentity: this.agent.myIdentity, peerPath,
       peerIdentity,
       waitForWs: true,
       timeout: this.config.requestToConnTimeout,
@@ -149,7 +151,7 @@ class WssConnManager extends ConnManager {
 
     const ws = new WebSocket(peerIdentity.addr);
     ws.onopen = async () => {
-      ws.send(JSON.stringify(await makeRequestToConnMessage(this.myIdentity, peerPath)));
+      ws.send(JSON.stringify(await makeRequestToConnMessage(this.agent.myIdentity, peerPath)));
     };
 
     setTimeout(() => {
@@ -157,20 +159,20 @@ class WssConnManager extends ConnManager {
     }, this.config.requestToConnTimeout);
   }
 
-  protected async connectUnnamed(peerPath: string, viaAddr: string): Promise<void> {
+  protected async connectUnnamed(peerPath: string, _opts: ConnManager.ConnectOptsImpl): Promise<void> {
     const conn = new WsConn();
     const peerIdentity = new PeerIdentity(peerPath);
     this.pendingWsConns[peerIdentity.addr] = conn;
 
     const startLinkPromise = conn.startLink({
-      myIdentity: this.myIdentity, peerPath,
+      myIdentity: this.agent.myIdentity, peerPath,
       peerIdentity,
       timeout: this.config.requestToConnTimeout,
       waitForWs: true,
     });
 
-    const connVia = await this.createTunnel(peerPath, viaAddr);
-    connVia.send(await makeRequestToConnMessage(this.myIdentity, peerPath));
+    const connVia = await this.agent.tunnelManager.create(peerPath);
+    connVia.send(await makeRequestToConnMessage(this.agent.myIdentity, peerPath));
 
     await startLinkPromise;
   }
