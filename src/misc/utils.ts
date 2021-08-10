@@ -20,3 +20,7 @@ export async function calcAddrOrSubSpaceHash(addrOrSubSpace: string): Promise<Ui
   const hash = await crypto.subtle.digest('SHA-512', (new TextEncoder()).encode(addrOrSubSpace));
   return new Uint32Array(hash);
 }
+
+export function formatFirstUint32Hex(data: Uint32Array) {
+  return '0x' + ('00000000' + data[0].toString(16)).slice(-8);
+}

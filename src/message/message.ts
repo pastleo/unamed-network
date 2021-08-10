@@ -6,8 +6,10 @@ export interface Message {
   srcPath: string;
   desPath: string;
 }
+export type MessageData = Omit<Message, 'srcPath' | 'desPath'> & { [_: string]: any };
+
 type MessageAddrs = Pick<Message, 'srcPath' | 'desPath'>;
-export type MessageData = Message & { [_: string]: any }
+type AnyMessage = Message & { [_: string]: any }
 
 export function toMessage(data: any): Message {
   if (
@@ -19,7 +21,7 @@ export function toMessage(data: any): Message {
   }
 }
 
-function messageAddrs(data: MessageData): MessageAddrs {
+function messageAddrs(data: AnyMessage): MessageAddrs {
   return { srcPath: data.srcPath, desPath: data.desPath };
 }
 
@@ -31,10 +33,10 @@ export interface RequestToConnMessage extends Message {
 
   offer?: RTCSessionDescription;
 }
-export function toRequestToConnMessage(data: MessageData): RequestToConnMessage {
+export function toRequestToConnMessage(data: AnyMessage): RequestToConnMessage {
   return data.term === 'requestToConn' && newRequestToConnMessage(data);
 }
-export function newRequestToConnMessage(data: MessageData): RequestToConnMessage {
+export function newRequestToConnMessage(data: AnyMessage): RequestToConnMessage {
   if (
     typeof data.signingPubKey === 'string' &&
     typeof data.encryptionPubKey === 'string' &&
@@ -68,10 +70,10 @@ export interface RequestToConnResultMessage extends Message {
 
   answer?: RTCSessionDescription;
 }
-export function toRequestToConnResultMessage(data: MessageData): RequestToConnResultMessage {
+export function toRequestToConnResultMessage(data: AnyMessage): RequestToConnResultMessage {
   return data.term === 'requestToConnResult' && newRequestToConnResultMessage(data);
 }
-export function newRequestToConnResultMessage(data: MessageData): RequestToConnResultMessage {
+export function newRequestToConnResultMessage(data: AnyMessage): RequestToConnResultMessage {
   if (
     typeof data.signingPubKey === 'string' &&
     typeof data.encryptionPubKey === 'string' &&
@@ -114,10 +116,10 @@ export interface RtcIceMessage extends Message {
   term: 'rtcIce';
   ice: RTCIceCandidate;
 }
-export function toRtcIceMessage(data: MessageData): RtcIceMessage {
+export function toRtcIceMessage(data: AnyMessage): RtcIceMessage {
   return data.term === 'rtcIce' && newRtcIceMessage(data);
 }
-export function newRtcIceMessage(data: MessageData): RtcIceMessage {
+export function newRtcIceMessage(data: AnyMessage): RtcIceMessage {
   if (
     typeof data.ice === 'object'
   ) {
@@ -127,32 +129,4 @@ export function newRtcIceMessage(data: MessageData): RtcIceMessage {
       ice: data.ice as RTCIceCandidate,
     };
   }
-}
-
-export interface PingMessage extends Message {
-  term: 'ping'
-  timestamp: number
-}
-export function toPingMessage(data: MessageData): PingMessage {
-  return data.term === 'ping' && newPingMessage(data);
-}
-export function newPingMessage(data: MessageData): PingMessage {
-  if (
-    typeof data.timestamp === 'number'
-  ) {
-    return {
-      term: 'ping',
-      ...messageAddrs(data),
-      timestamp: data.timestamp,
-    };
-  }
-}
-
-export interface FindNodeMessage extends Message {
-  term: 'find-node'
-}
-
-export interface FindNodeResponseMessage extends Message {
-  term: 'find-node-response'
-
 }

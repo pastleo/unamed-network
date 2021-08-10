@@ -87,10 +87,6 @@ abstract class ConnManager extends EventTarget<EventMap> {
 
   protected abstract connectUnnamed(peerPath: string, opts: ConnManager.ConnectOptsImpl): Promise<void>;
 
-  //getConn(peerAddr: string): Conn {
-    //return this.conns[peerAddr];
-  //}
-
   hasConn(peerAddr: string): boolean {
     return peerAddr in this.conns;
   }
@@ -105,11 +101,6 @@ abstract class ConnManager extends EventTarget<EventMap> {
   }
 
   protected addConn(peerAddr: string, conn: Conn, peerPath: string): void {
-    //if (peerAddr === this.myIdentity.addr) {
-      //console.warn('adding conn of myself!?');
-      //conn.close();
-      //return;
-    //}
     const reconnected = peerAddr in this.conns;
     if (reconnected) {
       this.conns[peerAddr].close();

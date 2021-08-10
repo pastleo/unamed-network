@@ -46,26 +46,28 @@ class TunnelManager extends EventTarget<EventMap> {
     this.agent = agent;
   }
 
-  start() {
-  }
-
-  async onReceiveMessage(event: MessageReceivedEvent) {
+  onReceiveMessage(event: MessageReceivedEvent): boolean {
     const { tunnelConnId } = event.detail as Tunnel.Message;
-    const tunnel = this.tunnels[tunnelConnId];
-    if (tunnel) {
-      tunnel.onReceive(event);
-    } else if (tunnelConnId) {
-      const newTunnel = new TunnelConn(tunnelConnId);
+    if (tunnelConnId) {
+      (async () => {
+        const tunnel = this.tunnels[tunnelConnId];
+        if (tunnel) {
+          tunnel.onReceive(event);
+        } else {
+          const newTunnel = new TunnelConn(tunnelConnId);
 
-      const newTunnelEvent = new NewTunnelEvent({ tunnel: newTunnel });
-      this.dispatchEvent(newTunnelEvent);
+          const newTunnelEvent = new NewTunnelEvent({ tunnel: newTunnel });
+          this.dispatchEvent(newTunnelEvent);
 
-      if (!newTunnelEvent.defaultPrevented) {
-        const { srcPath: peerPath } = event.detail;
-        this.tunnels[newTunnel.connId] = newTunnel;
-        await this.startTunnel(peerPath, newTunnel);
-        newTunnel.onReceive(event);
-      }
+          if (!newTunnelEvent.defaultPrevented) {
+            const { srcPath: peerPath } = event.detail;
+            this.tunnels[newTunnel.connId] = newTunnel;
+            await this.startTunnel(peerPath, newTunnel);
+            newTunnel.onReceive(event);
+          }
+        }
+      })();
+      return true;
     }
   }
 
@@ -92,7 +94,8 @@ class TunnelManager extends EventTarget<EventMap> {
     return tunnel;
   }
 
-  cacheReceive(fromPeerAddr: string, message: OriMessage): void {
+  cacheReceive(fromPeerAddr: string, srcAddr: string, message: OriMessage): void {
+    if (fromPeerAddr === srcAddr) return;
     const { tunnelConnId, direction } = message as Tunnel.Message;
 
     switch (direction) {
@@ -101,12 +104,6 @@ class TunnelManager extends EventTarget<EventMap> {
       case Tunnel.Direction.B:
         return this.saveCache(tunnelConnId, Tunnel.Direction.A, message.srcPath, fromPeerAddr);
     }
-  }
-
-  cacheSend(toPeerAddr: string, message: OriMessage): void {
-    const { tunnelConnId, direction } = message as Tunnel.Message;
-
-    this.saveCache(tunnelConnId, direction, message.desPath, toPeerAddr);
   }
 
   private saveCache(tunnelConnId: string, direction: Tunnel.Direction, desPath: string, peerAddr: string) {

@@ -1,4 +1,4 @@
-import { calcAddrOrSubSpaceHash, extractAddrFromPath } from './misc/utils';
+import { calcAddrOrSubSpaceHash, formatFirstUint32Hex } from './misc/utils';
 
 type RoutingTableLine = [hash: Uint32Array, addr: string];
 type pathWithoutAddr = string;
@@ -77,7 +77,7 @@ class Router {
     rmAddrR(this.joinedSpace);
   }
 
-  getSpaceAndAddr(path: string): [Space, string] {
+  getSpaceAndAddr(path: string = ''): [Space, string] {
     const pathSegs = path.split('>');
     let currentSpace = this.joinedSpace;
     while (pathSegs.length > 1) {
@@ -99,7 +99,7 @@ class Router {
   }
 
   printableTable(pathWithAddr: string) {
-    return this.getSpaceAndAddr(pathWithAddr)[0].table.map(([hash, addr]) => `${hash[0].toString(16)} : ${addr}`).join('\n')
+    return this.getSpaceAndAddr(pathWithAddr)[0].table.map(([hash, addr]) => `${formatFirstUint32Hex(hash)} : ${addr}`).join('\n')
   }
 
   async route(desPath: string, baseAddr?: string): Promise<RouteResult> {
@@ -141,13 +141,14 @@ class Router {
       ) <= 0
     }
 
-    return {
+    const result = {
       addrs: nextAddr ? [nextAddr] : [],
       notMakingProgressFromBase,
       mightBeForMe: compareUint32Array(
         mySelfXor, minXor
       ) <= 0
     };
+    return result;
   }
 }
 

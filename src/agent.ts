@@ -1,55 +1,49 @@
-import EventTarget, { CustomEvent } from './misc/event-target';
+import EventTarget from './misc/event-target';
 import ConnManager, { NewConnEvent } from './conn-manager/base';
 import { ConnCloseEvent } from './conn/base';
 import Router from './router';
-import { Message } from './message/message';
+import { Message, MessageData } from './message/message';
 import { MessageReceivedEvent } from './conn/base';
+import { NetworkMessageReceivedEvent } from './misc/events';
 import Identity from './misc/identity';
 import TunnelManager from './tunnel';
+import RequestManager from './request';
 import { extractAddrFromPath } from './misc/utils';
 
-interface ConfigMandatory {
-}
-interface ConfigOptional {
-  routeTtl: number,
-}
-
-type Config = ConfigMandatory & ConfigOptional;
-type ArgConfig = ConfigMandatory & Identity.Config & Partial<ConfigOptional>;
-
-export class NetworkMessageReceivedEvent extends CustomEvent<Message> {
-  type = 'receive-network';
-  messageReceivedEvent: MessageReceivedEvent;
-  exactForMe: boolean;
-
-  constructor(messageReceivedEvent: MessageReceivedEvent, myIdentity: Identity) {
-    super(messageReceivedEvent.detail);
-    this.messageReceivedEvent = messageReceivedEvent;
-    this.exactForMe = messageReceivedEvent.desAddr === myIdentity.addr;
-  }
+declare namespace Agent {
+  type Config = {
+    routeTtl: number;
+    requestTimeout: number;
+  } & Identity.Config;
 }
 
 interface EventMap {
   'receive-network': NetworkMessageReceivedEvent;
 }
 
-export default class Agent extends EventTarget<EventMap> {
+const agentDefaultConfig: Agent.Config = {
+  routeTtl: 10,
+  requestTimeout: 1000,
+}
+
+class Agent extends EventTarget<EventMap> {
   myIdentity: Identity;
   connManager: ConnManager;
   tunnelManager: TunnelManager;
-  private config: Config;
+  requestManager: RequestManager;
+  private config: Agent.Config;
   private router: Router;
 
-  constructor(connManager: ConnManager, config: ArgConfig = {}) {
+  constructor(connManager: ConnManager, config: Partial<Agent.Config> = {}) {
     super();
     this.myIdentity = new Identity(config);
-    this.config = {
-      routeTtl: 10,
-      ...config,
-    };
+    this.config = { ...agentDefaultConfig, ...config };
     this.connManager = connManager;
     this.router = new Router();
     this.tunnelManager = new TunnelManager(this);
+    this.requestManager = new RequestManager(this, {
+      timeout: this.config.requestTimeout,
+    });
 
     this.connManager.addEventListener('new-conn', event => {
       this.onNewConn(event);
@@ -66,7 +60,6 @@ export default class Agent extends EventTarget<EventMap> {
     await this.myIdentity.generateIfNeeded();
     await this.connManager.start(this);
     await this.router.start(this.myIdentity.addr);
-    this.tunnelManager.start();
   }
 
   async connect(peerPath: string): Promise<boolean> {
@@ -81,7 +74,7 @@ export default class Agent extends EventTarget<EventMap> {
     return true;
   }
 
-  send(path: string, message: Omit<Message, 'srcPath' | 'desPath'> & { [_: string]: any }): Promise<boolean> {
+  send(path: string, message: MessageData): Promise<boolean> {
     return this.route({
       srcPath: this.myIdentity.addr,
       desPath: path,
@@ -94,24 +87,26 @@ export default class Agent extends EventTarget<EventMap> {
   }
 
   private onReceive(event: MessageReceivedEvent): void {
-    this.tunnelManager.cacheReceive(event.fromConn.peerIdentity.addr, event.detail);
+    this.tunnelManager.cacheReceive(event.fromConn.peerIdentity.addr, event.srcAddr, event.detail);
+    this.requestManager.cacheReceive(event.fromConn.peerIdentity.addr, event.srcAddr, event.detail);
 
     // TODO: what if this client is not in the dirname?
     if (event.desAddr === this.myIdentity.addr) {
       this.onReceiveMessage(event);
     } else {
-      this.route(event.detail, event.fromConn.peerIdentity.addr);
+      this.route(event.detail, event);
     }
   }
 
   protected async onReceiveMessage(event: MessageReceivedEvent) {
-    this.tunnelManager.onReceiveMessage(event);
-    //this.dispatchEvent(new NetworkMessageReceivedEvent(
-      //event, this.myIdentity,
-    //));
+    if (
+      this.tunnelManager.onReceiveMessage(event)
+    ) return;
+
+    this.handleReceiveNetworkMessage(new NetworkMessageReceivedEvent(event, true));
   }
 
-  async route(message: Message, fromAddr?: string): Promise<boolean> {
+  async route(message: Message, receiveEvent?: MessageReceivedEvent): Promise<boolean> {
     const { srcPath, desPath } = message;
     const srcAddr = extractAddrFromPath(srcPath);
     const desAddr = extractAddrFromPath(desPath);
@@ -125,10 +120,15 @@ export default class Agent extends EventTarget<EventMap> {
       return this.connManager.send(tunnelThroughAddr, message);
     }
 
-    const result = await this.router.route(desPath, fromAddr);
+    const requestThroughAddr = this.requestManager.route(message);
+    if (this.connManager.hasConn(requestThroughAddr)) {
+      return this.connManager.send(requestThroughAddr, message);
+    }
 
-    if (fromAddr && result.mightBeForMe && srcAddr !== this.myIdentity.addr) {
-      if (this.routeMessageMightBeForMe(message)) return true;
+    const result = await this.router.route(desPath, receiveEvent?.fromConn.peerIdentity.addr);
+
+    if (receiveEvent && result.mightBeForMe && srcAddr !== this.myIdentity.addr) {
+      if (this.routeMessageMightBeForMe(receiveEvent)) return true;
     }
 
     if (result.addrs.length === 0) {
@@ -163,16 +163,23 @@ export default class Agent extends EventTarget<EventMap> {
     }
   }
 
-  private routeMessageMightBeForMe(message: Message): boolean {
-    // WIP
-    console.log('agent.ts: routeMessageMightBeForMe:', { message });
-    //this.dispatchEvent(new NetworkMessageReceivedEvent(
-      //event, this.myIdentity,
-    //));
-    return false;
+  private routeMessageMightBeForMe(event: MessageReceivedEvent): boolean {
+    const networkMessageEvent = new NetworkMessageReceivedEvent(event, false);
+    this.handleReceiveNetworkMessage(networkMessageEvent);
+    return networkMessageEvent.defaultPrevented;
+  }
+
+  private handleReceiveNetworkMessage(event: NetworkMessageReceivedEvent) {
+    if (
+      this.requestManager.onReceiveNetworkMessage(event)
+    ) return;
+
+    this.dispatchEvent(event);
   }
 
   private onConnClose(event: ConnCloseEvent) {
     this.router.rmAddr(event.detail.conn.peerIdentity.addr);
   }
 }
+
+export default Agent;
