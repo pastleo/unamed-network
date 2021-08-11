@@ -4,7 +4,7 @@ import WsConn from '../conn/ws';
 import RtcConn from '../conn/rtc';
 import { PeerIdentity } from '../misc/identity';
 import { TunnelConn } from '../tunnel';
-import { RequestToConnMessage, newRequestToConnMessage } from '../message/message';
+import { RequestToConnMessage, newRequestToConnMessage } from '../message/conn';
 
 class BrowserConnManager extends ConnManager {
   private agent: Agent;

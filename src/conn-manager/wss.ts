@@ -3,7 +3,8 @@ import ConnManager, { RequestToConnEvent } from './base';
 import WsConn from '../conn/ws';
 import WebSocket, { Server as WebSocketServer, ServerOptions as WsServerOptions } from 'ws';
 import { PeerIdentity } from '../misc/identity';
-import { Message, toMessage, newRequestToConnMessage, newRequestToConnResultMessage } from '../message/message';
+import { Message, toMessage } from '../message/message';
+import { newRequestToConnMessage, newRequestToConnResultMessage } from '../message/conn';
 import { makeRequestToConnMessage, makeRequestToConnResultMessage } from '../message/conn';
 import { extractAddrFromPath } from '../misc/utils';
 

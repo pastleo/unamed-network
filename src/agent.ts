@@ -3,6 +3,7 @@ import ConnManager, { NewConnEvent } from './conn-manager/base';
 import { ConnCloseEvent } from './conn/base';
 import Router from './router';
 import { Message, MessageData } from './message/message';
+import { deriveNetworkMessage } from './message/network';
 import { MessageReceivedEvent } from './conn/base';
 import { NetworkMessageReceivedEvent } from './misc/events';
 import Identity from './misc/identity';
@@ -33,6 +34,7 @@ class Agent extends EventTarget<EventMap> {
   requestManager: RequestManager;
   private config: Agent.Config;
   private router: Router;
+  private receivedMsgId = new Set<string>();
 
   constructor(connManager: ConnManager, config: Partial<Agent.Config> = {}) {
     super();
@@ -107,22 +109,35 @@ class Agent extends EventTarget<EventMap> {
   }
 
   async route(message: Message, receiveEvent?: MessageReceivedEvent): Promise<boolean> {
-    const { srcPath, desPath } = message;
+    const networkMessage = deriveNetworkMessage(message, this.config.routeTtl);
+    const { srcPath, desPath, msgId } = networkMessage;
     const srcAddr = extractAddrFromPath(srcPath);
     const desAddr = extractAddrFromPath(desPath);
 
+    if (networkMessage.ttl < 0) {
+      console.warn(`message run out of ttl from '${srcPath}' to '${desPath}', dropping message:`, message);
+      return false;
+    }
+
+    if (this.receivedMsgId.has(msgId)) {
+      console.warn(`received twice (or more) same message with msgId '${msgId}' from '${srcPath}' to '${desPath}', dropping message:`, message);
+      return false;
+    } else {
+      this.receivedMsgId.add(msgId);
+    }
+
     if (this.connManager.hasConn(desAddr)) {
-      return this.connManager.send(desAddr, message);
+      return this.connManager.send(desAddr, networkMessage);
     }
 
-    const tunnelThroughAddr = this.tunnelManager.route(message);
+    const tunnelThroughAddr = this.tunnelManager.route(networkMessage);
     if (this.connManager.hasConn(tunnelThroughAddr)) {
-      return this.connManager.send(tunnelThroughAddr, message);
+      return this.connManager.send(tunnelThroughAddr, networkMessage);
     }
 
-    const requestThroughAddr = this.requestManager.route(message);
+    const requestThroughAddr = this.requestManager.route(networkMessage);
     if (this.connManager.hasConn(requestThroughAddr)) {
-      return this.connManager.send(requestThroughAddr, message);
+      return this.connManager.send(requestThroughAddr, networkMessage);
     }
 
     const result = await this.router.route(desPath, receiveEvent?.fromConn.peerIdentity.addr);
@@ -144,7 +159,7 @@ class Agent extends EventTarget<EventMap> {
     }
 
     if (result.broadcast) { // might need to do something before sending out
-      result.addrs.forEach(addr => this.connManager.send(addr, message));
+      result.addrs.forEach(addr => this.connManager.send(addr, networkMessage));
       return true;
     } else {
       if (result.notMakingProgressFromBase) {
@@ -158,7 +173,7 @@ class Agent extends EventTarget<EventMap> {
           { result }
         );
       }
-      result.addrs.forEach(addr => this.connManager.send(addr, message));
+      result.addrs.forEach(addr => this.connManager.send(addr, networkMessage));
       return true
     }
   }

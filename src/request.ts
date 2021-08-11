@@ -19,7 +19,7 @@ declare namespace Request {
 
   type ResolveFn = (message: Request.Message) => {};
   type requestId = string;
-  type RequestIdToThroughs = Record<requestId, Record<string, [path: string, peerAddr: string]>>;
+  type RequestIdToThroughs = Record<requestId, [path: string, peerAddr: string]>;
 }
 
 export class RequestedEvent extends NetworkMessageReceivedEvent {
@@ -111,32 +111,19 @@ class RequestManager extends EventTarget<EventMap> {
   cacheReceive(fromPeerAddr: string, srcAddr: string, message: OriMessage): void {
     if (fromPeerAddr === srcAddr) return;
     const { requestId, direction } = message as Request.Message;
+    if (!requestId || direction !== Request.Direction.Request) return;
 
-    switch (direction) {
-      case Request.Direction.Request:
-        return this.saveCache(requestId, Request.Direction.Response, message.srcPath, fromPeerAddr);
-      case Request.Direction.Response:
-        return this.saveCache(requestId, Request.Direction.Request, message.srcPath, fromPeerAddr);
-    }
-  }
-
-  private saveCache(requestId: string, direction: Request.Direction, desPath: string, peerAddr: string) {
     let through = this.requestIdToThroughs[requestId];
     if (!through) {
-      through = {};
-      this.requestIdToThroughs[requestId] = through;
-    }
-
-    if (!through[direction] && Object.values(through).length < 2) {
-      through[direction] = [desPath, peerAddr];
+      this.requestIdToThroughs[requestId] = [message.srcPath, fromPeerAddr];
     }
   }
 
   route(message: OriMessage): string | null {
     const { requestId, direction } = message as Request.Message;
 
-    if (requestId && direction) {
-      const through = this.requestIdToThroughs[requestId]?.[direction];
+    if (requestId && direction === Request.Direction.Response) {
+      const through = this.requestIdToThroughs[requestId];
       if (through) {
         const [desPath, peerAddr] = through;
         if (message.desPath === desPath) return peerAddr;

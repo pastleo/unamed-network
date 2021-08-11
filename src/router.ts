@@ -99,7 +99,9 @@ class Router {
   }
 
   printableTable(pathWithAddr: string) {
-    return this.getSpaceAndAddr(pathWithAddr)[0].table.map(([hash, addr]) => `${formatFirstUint32Hex(hash)} : ${addr}`).join('\n')
+    return this.getSpaceAndAddr(pathWithAddr)[0].table.map(
+      ([hash, addr]) => `${formatFirstUint32Hex(hash)} : ${addr}`
+    ).join('\n') + '\n'
   }
 
   async route(desPath: string, baseAddr?: string): Promise<RouteResult> {

@@ -97,6 +97,7 @@ class TunnelManager extends EventTarget<EventMap> {
   cacheReceive(fromPeerAddr: string, srcAddr: string, message: OriMessage): void {
     if (fromPeerAddr === srcAddr) return;
     const { tunnelConnId, direction } = message as Tunnel.Message;
+    if (!tunnelConnId) return;
 
     switch (direction) {
       case Tunnel.Direction.A:
@@ -113,7 +114,7 @@ class TunnelManager extends EventTarget<EventMap> {
       this.connIdToThroughs[tunnelConnId] = through;
     }
 
-    if (!through[direction] && Object.values(through).length < 2) {
+    if (!through[direction]) {
       through[direction] = [desPath, peerAddr];
     }
   }

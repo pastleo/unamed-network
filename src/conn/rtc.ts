@@ -1,6 +1,7 @@
 import Conn from './base';
 import Identity, { PeerIdentity } from '../misc/identity';
-import { Message, RequestToConnResultMessage, newRequestToConnResultMessage, RtcIceMessage, newRtcIceMessage } from '../message/message';
+import { Message } from '../message/message';
+import { RequestToConnResultMessage, newRequestToConnResultMessage, RtcIceMessage, newRtcIceMessage } from '../message/conn';
 import { makeRequestToConnMessage, makeRequestToConnResultMessage } from '../message/conn';
 import { TunnelConn } from '../tunnel';
 

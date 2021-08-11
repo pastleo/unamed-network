@@ -1,6 +1,7 @@
 import Conn from './base'
 import Identity, { PeerIdentity } from '../misc/identity';
-import { Message, toRequestToConnResultMessage } from '../message/message';
+import { Message } from '../message/message';
+import { toRequestToConnResultMessage } from '../message/conn';
 import { makeRequestToConnMessage, makeRequestToConnResultMessage } from '../message/conn';
 
 import NodeWebSocket from 'ws';
