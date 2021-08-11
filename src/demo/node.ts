@@ -18,7 +18,7 @@ const agent = new Agent(connManager, {
 
 (async () => {
   // DEV monitor:
-  connManager.addEventListener('new-conn', event => {
+  agent.addEventListener('new-conn', event => {
     console.log('new-conn', event.detail.conn.peerIdentity.addr);
 
     const pingMessage: PingMessage = {
@@ -29,7 +29,7 @@ const agent = new Agent(connManager, {
   agent.addEventListener('receive-network', event => {
     console.log('receive-network', event);
   });
-  connManager.addEventListener('close', event => {
+  agent.addEventListener('close', event => {
     console.log('close', event);
   });
   agent.requestManager.addEventListener('requested', event => {
@@ -39,6 +39,8 @@ const agent = new Agent(connManager, {
 
   await agent.start();
   console.log('agent started', agent.myIdentity.addr);
+  const joinResult = await agent.join();
+  console.log('agent joined', joinResult);
 
   repl.start({ prompt: '> ' });
 })();

@@ -1,4 +1,4 @@
-import { Message } from './message';
+import { Message, AnyMessage, toMessage } from './message';
 import { randomStr } from '../misc/utils';
 
 export interface NetworkMessage extends Message {
@@ -19,10 +19,32 @@ export interface PingMessage {
   timestamp: number
 }
 
-export interface FindNodeMessage {
-  term: 'find-node'
+export interface QueryAddrsMessageData {
+  term: 'query-addrs'
+  spacePath: string; // maybe we don't need this, desPath has this
+}
+export type QueryAddrsMessage = QueryAddrsMessageData & Message;
+export function deriveQueryAddrsMessage(data: AnyMessage): QueryAddrsMessage {
+  if (typeof data.spacePath === 'string') {
+    return {
+      ...toMessage(data),
+      term: 'query-addrs',
+      spacePath: data.spacePath,
+    };
+  }
 }
 
-export interface FindNodeResponseMessage {
-  term: 'find-node-response'
+export interface QueryAddrsResponseMessageData {
+  term: 'query-addrs-response'
+  addrs: string[];
+}
+export type QueryAddrsResponseMessage = QueryAddrsResponseMessageData & Message;
+export function deriveQueryAddrsResponseMessage(data: AnyMessage): QueryAddrsResponseMessage {
+  if (Array.isArray(data.addrs)) {
+    return {
+      ...toMessage(data),
+      term: 'query-addrs-response',
+      addrs: data.addrs,
+    };
+  }
 }

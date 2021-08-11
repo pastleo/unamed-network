@@ -10,7 +10,7 @@ const agent = new Agent(connManager);
 
 (async () => {
   // DEV monitor:
-  connManager.addEventListener('new-conn', event => {
+  agent.addEventListener('new-conn', event => {
     console.log('new-conn', event.detail.conn.peerIdentity.addr);
 
     const pingMessage: PingMessage = {
@@ -21,7 +21,7 @@ const agent = new Agent(connManager);
   agent.addEventListener('receive-network', event => {
     console.log('receive-network', event);
   });
-  connManager.addEventListener('close', event => {
+  agent.addEventListener('close', event => {
     console.log('close', event);
   });
   agent.requestManager.addEventListener('requested', event => {
@@ -33,6 +33,14 @@ const agent = new Agent(connManager);
   console.log('agent started', agent.myIdentity.addr);
 
   await agent.connect('ws://localhost:8081');
+  const joinResult = await agent.join();
+  console.log('agent connected and joined', joinResult);
+
+  const aLink = document.createElement('a');
+  aLink.href = location.href;
+  aLink.target = '_blank';
+  aLink.textContent = location.href;
+  document.body.appendChild(aLink);
 })();
 
 (window as any).ping = (desAddr: string) => ping(agent, desAddr);

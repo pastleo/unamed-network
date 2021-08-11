@@ -1,6 +1,10 @@
-import { calcAddrOrSubSpaceHash, formatFirstUint32Hex } from './misc/utils';
+import {
+  joinPath, calcAddrOrSubSpaceHash, formatFirstUint32Hex,
+  shuffle,
+} from './misc/utils';
 
 type RoutingTableLine = [hash: Uint32Array, addr: string];
+type KBuckets = Map<number, RoutingTableLine[]>;
 type pathWithoutAddr = string;
 interface Space {
   table: RoutingTableLine[];
@@ -22,12 +26,12 @@ interface RouteResult {
 class Router {
   private myAddr: string;
   private myHash: Uint32Array;
-  private joinedSpace: Space;
+  private rootSpace: Space;
   
   async start(myAddr: string) {
     this.myAddr = myAddr;
     this.myHash = await calcAddrOrSubSpaceHash(this.myAddr);
-    this.joinedSpace = {
+    this.rootSpace = {
       table: [],
       path: '',
       subSpaces: {},
@@ -44,7 +48,7 @@ class Router {
       if (!subSpace) {
         subSpace = {
           table: [],
-          path: pathSegs.slice(0, level + 1).join('>'),
+          path: joinPath(pathSegs.slice(0, level + 1)),
           subSpaces: {},
         };
         currentSpace.subSpaces[currentSpaceName] = subSpace;
@@ -53,15 +57,13 @@ class Router {
       mkSpaceP(level + 1, subSpace);
     };
 
-    mkSpaceP(0, this.joinedSpace);
+    mkSpaceP(0, this.rootSpace);
   }
 
   async addPath(path: string) {
     const [space, addr] = this.getSpaceAndAddr(path);
     const hash = await calcAddrOrSubSpaceHash(addr);
-    const { exact, left } = findHashIndex(space, hash);
-    if (exact !== undefined) throw new Error(`path ${path} exists in the table of space`);
-    space.table.splice(left, 0, [hash, addr]);
+    addLine(space.table, [hash, addr]);
   }
 
   rmAddr(addr: string) {
@@ -74,38 +76,48 @@ class Router {
         rmAddrR(space);
       });
     };
-    rmAddrR(this.joinedSpace);
+    rmAddrR(this.rootSpace);
   }
 
-  getSpaceAndAddr(path: string = ''): [Space, string] {
+  getSpaceAndAddr(path: string = '', exact = true): [Space, string] {
     const pathSegs = path.split('>');
-    let currentSpace = this.joinedSpace;
+    let currentSpace = this.rootSpace;
     while (pathSegs.length > 1) {
-      currentSpace = currentSpace.subSpaces[pathSegs[0]];
-      if (!currentSpace) throw new Error(`router.ts: addPath: space ${pathSegs.slice(0, -1).join('>')} not exists`);
+      if (pathSegs[0]) {
+        currentSpace = currentSpace.subSpaces[pathSegs[0]];
+        if (!currentSpace && exact) throw new Error(`router.ts: getSpaceAndAddr: space ${joinPath(pathSegs.slice(0, -1))} not exists`);
+      }
       pathSegs.shift();
     }
     return [currentSpace, pathSegs[0]];
   }
-  getSpace(pathWithoutAddr: string): Space {
-    const pathSegs = pathWithoutAddr.split('>');
-    let currentSpace = this.joinedSpace;
+
+  getSpace(spacePath: string, exact = true): Space {
+    const pathSegs = spacePath.split('>');
+    let currentSpace = this.rootSpace;
     while (pathSegs.length > 0) {
-      currentSpace = currentSpace.subSpaces[pathSegs[0]];
-      if (!currentSpace) throw new Error(`router.ts: addPath: space ${pathSegs.slice(0, -1).join('>')} not exists`);
+      if (pathSegs[0]) {
+        currentSpace = currentSpace.subSpaces[pathSegs[0]];
+        if (!currentSpace && exact) throw new Error(`router.ts: getSpace: space ${spacePath} not exists`);
+      }
       pathSegs.shift();
     }
     return currentSpace;
   }
 
+  getLine(spacePath: string, addr: string): RoutingTableLine {
+    const space = this.getSpace(spacePath);
+    return space.table.find(line => line[1] === addr);
+  }
+
   printableTable(pathWithAddr: string) {
-    return this.getSpaceAndAddr(pathWithAddr)[0].table.map(
+    return this.getSpaceAndAddr(pathWithAddr, true)[0].table.map(
       ([hash, addr]) => `${formatFirstUint32Hex(hash)} : ${addr}`
     ).join('\n') + '\n'
   }
 
   async route(desPath: string, baseAddr?: string): Promise<RouteResult> {
-    const [space, target] = this.getSpaceAndAddr(desPath);
+    const [space, target] = this.getSpaceAndAddr(desPath, false);
 
     if (!target) {
       console.warn(`desPath: '${desPath}' does not have a valid target`);
@@ -152,6 +164,63 @@ class Router {
     };
     return result;
   }
+
+  buildSpaceKBuckets(spacePath: string): KBuckets {
+    return this.buildKBuckets(this.getSpace(spacePath).table);
+  }
+
+  buildKBuckets(lines: RoutingTableLine[]): KBuckets {
+    const kBuckets: KBuckets = new Map();
+    lines.forEach(addrAndHash => {
+      const k = sameBitsUint32Array(this.myHash, addrAndHash[0]);
+      let bucket: RoutingTableLine[] = kBuckets.get(k);
+      if (bucket === undefined) {
+        bucket = [];
+        kBuckets.set(k, bucket);
+      }
+
+      const { exact, left } = findHashIndex(bucket, addrAndHash[0]);
+      if (exact !== undefined) return;
+      bucket.splice(left, 0, addrAndHash);
+    });
+    return kBuckets;
+  }
+
+  dbgMyHash() {
+    dbgLines('me', [[this.myHash, this.myAddr]]);
+  }
+  
+  removeLines(kBuckets: KBuckets, lines: RoutingTableLine[]): void {
+    [...lines, [this.myHash, this.myAddr] as RoutingTableLine].forEach(([hash, _addr]) => {
+      const k = sameBitsUint32Array(this.myHash, hash);
+      const bucket = kBuckets.get(k);
+      if (bucket) {
+        const { exact } = findHashIndex(bucket, hash);
+        if (typeof exact === 'number') {
+          bucket.splice(exact, 1);
+          if (bucket.length === 0) {
+            kBuckets.delete(k);
+          }
+        }
+      }
+    });
+  }
+
+  pickAddrsToConnect(kBuckets: KBuckets, existingKBuckets: KBuckets): string[] {
+    const addrs: string[] = [];
+    kBuckets.forEach((lines, k) => {
+      const allowedNewLines = k < 3 ? 3 - k : 1;
+      const existingLines = existingKBuckets.get(k) || [];
+      const linesToPick = Math.min(allowedNewLines - existingLines.length, lines.length);
+      if (linesToPick > 0) {
+        addrs.push(
+          ...shuffle(lines).slice(0, linesToPick).map(line => line[1])
+        );
+      }
+    });
+
+    return addrs;
+  }
 }
 
 function xorUint32Array(hash1: Uint32Array, hash2: Uint32Array): Uint32Array {
@@ -167,11 +236,32 @@ function compareUint32Array(arr1: Uint32Array, arr2: Uint32Array): number {
   return 0;
 }
 
-function findHashIndex(space: Space, hash: Uint32Array): FindAddrIndexResult {
-  let left = 0, right = space.table.length;
+function sameBitsUint32Array(arr1: Uint32Array, arr2: Uint32Array): number {
+  const xor = xorUint32Array(arr1, arr2);
+  let sameBits = 0;
+  for(let i = 0; i < xor.length; i++) {
+    for (let j = 0; j < 32; j++) {
+      if ((0x80000000 & xor[i]) !== 0) return sameBits;
+      sameBits++;
+      xor[i] = xor[i] << 1;
+    }
+  }
+  return sameBits;
+}
+
+export function hashLine(addrs: string[]): Promise<RoutingTableLine[]> {
+  return Promise.all(
+    addrs.map(async (addr): Promise<RoutingTableLine> => ([
+      await calcAddrOrSubSpaceHash(addr), addr
+    ]))
+  );
+}
+
+function findHashIndex(lines: RoutingTableLine[], hash: Uint32Array): FindAddrIndexResult {
+  let left = 0, right = lines.length;
   while (left !== right) {
     const middle = Math.floor((left + right) / 2);
-    const compared = compareUint32Array(hash, space.table[middle][0]);
+    const compared = compareUint32Array(hash, lines[middle][0]);
     if (compared === -1) { right = middle; }
     else if (compared === 1) { left = middle + 1; }
     else { // compared === 0
@@ -179,6 +269,47 @@ function findHashIndex(space: Space, hash: Uint32Array): FindAddrIndexResult {
     }
   }
   return { left };
+}
+
+export function mergeKBuckets(...kBucketsArr: KBuckets[]): KBuckets {
+  const newKBuckets: KBuckets = new Map();
+  kBucketsArr.forEach(kBuckets => {
+    kBuckets.forEach((lines, k) => {
+      let bucket: RoutingTableLine[] = newKBuckets.get(k);
+      if (bucket === undefined) {
+        bucket = [];
+        newKBuckets.set(k, bucket);
+      }
+
+      lines.forEach(line => {
+        addLine(bucket, line);
+      });
+    });
+  });
+
+  return newKBuckets;
+}
+
+function addLine(lines: RoutingTableLine[], line: RoutingTableLine): void {
+  const { exact, left } = findHashIndex(lines, line[0]);
+  if (exact !== undefined) return;
+  lines.splice(left, 0, line);
+}
+
+export function dbgLines(name: string, lines: RoutingTableLine[]) {
+  console.group(name);
+  console.log(
+    lines.map(([hash, addr]) => `${formatFirstUint32Hex(hash)} :: ${addr}`).join('\n')
+  );
+  console.groupEnd();
+}
+
+export function dbgKBuckets(name: string, kBuckets: KBuckets): void {
+  console.group(name);
+  kBuckets.forEach((lines, k) => {
+    dbgLines(k.toString(), lines);
+  })
+  console.groupEnd();
 }
 
 export default Router;

@@ -1,15 +1,19 @@
 import EventTarget from './misc/event-target';
 import ConnManager, { NewConnEvent } from './conn-manager/base';
 import { ConnCloseEvent } from './conn/base';
-import Router from './router';
+import Router, { hashLine, mergeKBuckets } from './router';
 import { Message, MessageData } from './message/message';
-import { deriveNetworkMessage } from './message/network';
+import {
+  deriveNetworkMessage,
+  QueryAddrsMessage, QueryAddrsMessageData, deriveQueryAddrsMessage,
+  QueryAddrsResponseMessage, QueryAddrsResponseMessageData, deriveQueryAddrsResponseMessage,
+} from './message/network';
 import { MessageReceivedEvent } from './conn/base';
 import { NetworkMessageReceivedEvent } from './misc/events';
 import Identity from './misc/identity';
 import TunnelManager from './tunnel';
-import RequestManager from './request';
-import { extractAddrFromPath } from './misc/utils';
+import RequestManager, { RequestedEvent } from './request';
+import { joinPath, extractAddrFromPath, wait } from './misc/utils';
 
 declare namespace Agent {
   type Config = {
@@ -20,6 +24,8 @@ declare namespace Agent {
 
 interface EventMap {
   'receive-network': NetworkMessageReceivedEvent;
+  'new-conn': NewConnEvent;
+  'close': ConnCloseEvent;
 }
 
 const agentDefaultConfig: Agent.Config = {
@@ -56,6 +62,10 @@ class Agent extends EventTarget<EventMap> {
     this.connManager.addEventListener('receive', event => {
       this.onReceive(event);
     });
+
+    this.requestManager.addEventListener('requested', event => {
+      this.onRequested(event);
+    });
   }
 
   async start() {
@@ -65,16 +75,117 @@ class Agent extends EventTarget<EventMap> {
   }
 
   async connect(peerPath: string): Promise<boolean> {
-    await this.connManager.connect(peerPath, {});
+    const peerAddr = extractAddrFromPath(peerPath);
+    if (this.connManager.hasConn(peerAddr)) {
+      await this.router.addPath(peerPath);
+    } else {
+      await this.connManager.connect(peerPath, {});
+      await this.router.addPath(peerPath);
+    }
     return true;
   }
 
-  async join(_pathWithoutAddr: string): Promise<boolean> {
-    // WIP
-    //const tunnel = await this.connManager.createTunnel(this.connManager.myIdentity.addr);
+  async join(spacePath: string = ''): Promise<boolean> {
+    let connectSpaceNeighborSucceed = false;
+    let connectSpaceNeighborTried = 0;
+    let addrResponse: QueryAddrsResponseMessage;
+    while(!connectSpaceNeighborSucceed && connectSpaceNeighborTried < 3) {
+      try {
+        addrResponse = await this.connectSpaceNeighbor(spacePath);
+        connectSpaceNeighborSucceed = true;
+      } catch (err) {
+        console.warn(`agent.ts: join: connectSpaceNeighbor failed, #${connectSpaceNeighborTried} retry in 3 secs...`, err);
+        connectSpaceNeighborTried++;
+        await wait(3000);
+      }
+    }
+    if (!connectSpaceNeighborSucceed) return false;
+
+    let connectSpacePeersSucceed = false;
+    let connectSpacePeersTried = 0;
+    while(!connectSpacePeersSucceed && connectSpacePeersTried < 3) {
+      try {
+        await this.connectSpacePeers(
+          spacePath,
+          addrResponse.addrs,
+          extractAddrFromPath(addrResponse.srcPath),
+        );
+        connectSpacePeersSucceed = true;
+      } catch (err) {
+        console.warn(`agent.ts: join: connectSpacePeers failed, #${connectSpacePeersTried} retry in 3 secs...`, err);
+        connectSpacePeersTried++;
+        await wait(3000);
+      }
+    }
 
     return true;
   }
+
+  private async connectSpaceNeighbor(spacePath: string): Promise<QueryAddrsResponseMessage> {
+    const request = await this.requestManager.request(this.myIdentity.addr, makeRequestAddrMessage(spacePath));
+    const addrResponse = deriveQueryAddrsResponseMessage(request.responseMessage);
+
+    await this.connect(addrResponse.srcPath);
+    await this.router.addPath(addrResponse.srcPath);
+
+    return addrResponse;
+  }
+
+  private async connectSpacePeers(spacePath: string, knownAddrs: string[], neighborAddr: string) {
+    const addrAndHashes = await hashLine(knownAddrs);
+
+    const existingKBuckets = this.router.buildSpaceKBuckets(spacePath);
+    const responseKBuckets = this.router.buildKBuckets(addrAndHashes);
+    const nextRequestKBuckets = mergeKBuckets(existingKBuckets, responseKBuckets);
+    this.router.removeLines(
+      nextRequestKBuckets,
+      [this.router.getLine(spacePath, neighborAddr)]
+    );
+
+    let nextRequestMaxK = -1;
+    let nextRequestMinK = Number.MAX_VALUE;
+    nextRequestKBuckets.forEach((_bucket, k) => {
+      if (k < nextRequestMinK) nextRequestMinK = k;
+      if (k > nextRequestMaxK) nextRequestMaxK = k;
+    });
+
+    const nextRequestAddrs = (nextRequestKBuckets.size > 0 ? (
+      nextRequestKBuckets.size >= 2 ? [nextRequestMaxK, nextRequestMinK] : [nextRequestMaxK]
+    ) : []).map(
+      k => nextRequestKBuckets.get(k)
+    ).map(
+      lines => lines[Math.floor(Math.random() * lines.length)][1]
+    );
+
+    let connectingKBuckets = responseKBuckets;
+
+    await Promise.all(
+      nextRequestAddrs.map(async addr => {
+        const subRequest = await this.requestManager.request(joinPath(spacePath, addr), makeRequestAddrMessage(spacePath));
+        const subAddrResponse = deriveQueryAddrsResponseMessage(subRequest.responseMessage);
+        const addrAndHashes = await hashLine(subAddrResponse.addrs);
+        connectingKBuckets = mergeKBuckets(
+          connectingKBuckets, this.router.buildKBuckets(
+            addrAndHashes
+          )
+        );
+      })
+    );
+    this.router.removeLines(connectingKBuckets, this.router.getSpace(spacePath).table);
+
+    const addrsToConnect = this.router.pickAddrsToConnect(connectingKBuckets, existingKBuckets);
+
+    await Promise.all(
+      addrsToConnect.map(addr => (
+        this.connect(joinPath(spacePath, addr))
+      ))
+    );
+  }
+
+  // WIP
+  leave(_spacePath: string) {}
+  listKnownAddrs(_spacePath: string) {}
+  broadcast(_spacePath: string) {}
 
   send(path: string, message: MessageData): Promise<boolean> {
     return this.route({
@@ -84,8 +195,9 @@ class Agent extends EventTarget<EventMap> {
     });
   }
 
-  private onNewConn(event: NewConnEvent) {
-    this.router.addPath(event.detail.peerPath);
+  private async onNewConn(event: NewConnEvent) {
+    await this.router.addPath(event.detail.peerPath);
+    this.dispatchEvent(event);
   }
 
   private onReceive(event: MessageReceivedEvent): void {
@@ -126,7 +238,8 @@ class Agent extends EventTarget<EventMap> {
       this.receivedMsgId.add(msgId);
     }
 
-    if (this.connManager.hasConn(desAddr)) {
+    // TODO: after DHT is done, this might be removed making sure not routing back for initial query-node
+    if (this.connManager.hasConn(desAddr) && receiveEvent?.fromConn.peerIdentity.addr !== desAddr) {
       return this.connManager.send(desAddr, networkMessage);
     }
 
@@ -152,7 +265,7 @@ class Agent extends EventTarget<EventMap> {
           'agent.ts: send: no available addr to send, router table:',
           this.router.printableTable(desPath),
         ].join('\n'),
-        { result }
+        { result, message }
       );
 
       return false;
@@ -170,7 +283,7 @@ class Agent extends EventTarget<EventMap> {
             `agent.ts: onRoute: message from ${srcPath} to ${desPath} not making progress, router table:`,
             this.router.printableTable(desPath),
           ].join('\n'),
-          { result }
+          { result, message }
         );
       }
       result.addrs.forEach(addr => this.connManager.send(addr, networkMessage));
@@ -180,21 +293,50 @@ class Agent extends EventTarget<EventMap> {
 
   private routeMessageMightBeForMe(event: MessageReceivedEvent): boolean {
     const networkMessageEvent = new NetworkMessageReceivedEvent(event, false);
-    this.handleReceiveNetworkMessage(networkMessageEvent);
-    return networkMessageEvent.defaultPrevented;
+    return this.handleReceiveNetworkMessage(networkMessageEvent);
   }
 
-  private handleReceiveNetworkMessage(event: NetworkMessageReceivedEvent) {
+  private handleReceiveNetworkMessage(event: NetworkMessageReceivedEvent): boolean {
     if (
       this.requestManager.onReceiveNetworkMessage(event)
-    ) return;
+    ) {
+      return true;
+    };
 
+    this.dispatchEvent(event);
+    return event.defaultPrevented;
+  }
+
+  private async onConnClose(event: ConnCloseEvent) {
+    this.router.rmAddr(event.detail.conn.peerIdentity.addr);
     this.dispatchEvent(event);
   }
 
-  private onConnClose(event: ConnCloseEvent) {
-    this.router.rmAddr(event.detail.conn.peerIdentity.addr);
+  private onRequested(event: RequestedEvent) {
+    switch (event.detail.term) {
+      case 'query-addrs':
+        return this.onRequestedAddrs(deriveQueryAddrsMessage(event.detail), event);
+    }
+  }
+
+  private onRequestedAddrs(message: QueryAddrsMessage, event: RequestedEvent) {
+    const space = this.router.getSpaceAndAddr(message.desPath)[0];
+    const srcAddr = extractAddrFromPath(message.srcPath);
+    const response: QueryAddrsResponseMessageData = {
+      term: 'query-addrs-response',
+      addrs: [
+        ...space.table.map(line => line[1]).filter(addr => addr !== srcAddr),
+      ],
+    };
+    event.response(response);
   }
 }
 
 export default Agent;
+
+function makeRequestAddrMessage(spacePath: string): QueryAddrsMessageData {
+  return {
+    term: 'query-addrs',
+    spacePath,
+  };
+}

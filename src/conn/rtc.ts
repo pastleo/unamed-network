@@ -19,7 +19,7 @@ class RtcConn extends Conn {
   private rtcDataChannel: RTCDataChannel;
   
   private startLinkResolve: () => void;
-  private startLinkReject: () => void;
+  private startLinkReject: (err: Error) => void;
   private pendingMessages: string[] = [];
 
   private pendingIce: RTCIceCandidate[] = [];
@@ -47,8 +47,7 @@ class RtcConn extends Conn {
 
       setTimeout(() => {
         if (this.state !== Conn.State.CONNECTED) {
-          console.warn('conn/rtc.ts: startLink: timeout');
-          this.startLinkReject();
+          this.startLinkReject(new Error(`conn/rtc.ts: startLink: connecting to ${this.peerIdentity.addr} timeout`));
         }
       }, timeout);
 
@@ -166,7 +165,7 @@ class RtcConn extends Conn {
         this.rtcConn.iceConnectionState === 'failed'
       ) {
         this.state = Conn.State.FAILED;
-        this.startLinkReject();
+        this.startLinkReject(new Error(`conn/rtc.ts: checkRtcConnState: connecting to ${this.peerIdentity.addr} ICE state failed`));
       }
     } else if (this.state === Conn.State.CONNECTED) {
       if (

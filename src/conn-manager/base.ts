@@ -54,8 +54,8 @@ declare namespace ConnManager {
 }
 
 const configDefault: ConnManager.Config = {
-  newConnTimeout: 1000,
-  requestToConnTimeout: 1000,
+  newConnTimeout: 10000,
+  requestToConnTimeout: 10000,
 }
 
 abstract class ConnManager extends EventTarget<EventMap> {
@@ -86,6 +86,10 @@ abstract class ConnManager extends EventTarget<EventMap> {
   protected abstract connectWs(peerPath: string, opts: ConnManager.ConnectOptsImpl): Promise<void>;
 
   protected abstract connectUnnamed(peerPath: string, opts: ConnManager.ConnectOptsImpl): Promise<void>;
+
+  connCount(): number {
+    return Object.entries(this.conns).length;
+  }
 
   hasConn(peerAddr: string): boolean {
     return peerAddr in this.conns;

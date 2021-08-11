@@ -22,7 +22,7 @@ class WsConn extends Conn {
   private ws: Ws;
 
   private connStartResolve: () => void = () => {};
-  private connStartReject: () => void = () => {};
+  private connStartReject: (err: Error) => void = () => {};
   private pendingMessages: string[] = [];
   private closing: boolean = false;
 
@@ -37,7 +37,7 @@ class WsConn extends Conn {
 
       setTimeout(() => {
         if (this.state !== Conn.State.CONNECTED) {
-          this.connStartReject();
+          this.connStartReject(new Error(`conn/ws.ts: startLink: connecting to ${this.peerIdentity.addr} timeout`));
         }
       }, opts.timeout);
 
@@ -47,7 +47,7 @@ class WsConn extends Conn {
 
       this.ws.onerror = (error: any) => {
         console.error('ws.ts: ws.onerror', error);
-        this.connStartReject();
+        this.connStartReject(new Error(`conn/ws.ts: startLink: connecting to ${this.peerIdentity.addr} failed, ws error`));
       }
 
       if (opts.beingConnected) {
