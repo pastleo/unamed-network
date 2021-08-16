@@ -5,6 +5,10 @@ import repl from 'repl';
 import { PingMessage } from '../message/network';
 import { ping, handleRequest } from './share';
 
+process.on('uncaughtException', err => {
+  console.log('Caught exception: ', err);
+});
+
 const serverOpts: WssConnManager.ServerOptions = {};
 if (process.env.HOST) serverOpts.host = process.env.HOST;
 if (process.env.PORT) serverOpts.port = parseInt(process.env.PORT);
@@ -39,8 +43,6 @@ const agent = new Agent(connManager, {
 
   await agent.start();
   console.log('agent started', agent.myIdentity.addr);
-  const joinResult = await agent.join();
-  console.log('agent joined', joinResult);
 
   repl.start({ prompt: '> ' });
 })();

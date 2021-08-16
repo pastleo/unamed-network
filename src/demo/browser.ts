@@ -33,8 +33,8 @@ const agent = new Agent(connManager);
   console.log('agent started', agent.myIdentity.addr);
 
   await agent.connect('ws://localhost:8081');
-  const joinResult = await agent.join();
-  console.log('agent connected and joined', joinResult);
+  //const joinResult = await agent.join();
+  console.log('agent connected');
 
   const aLink = document.createElement('a');
   aLink.href = location.href;

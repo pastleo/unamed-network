@@ -5,15 +5,16 @@ import Router, { hashLine, mergeKBuckets } from './router';
 import { Message, MessageData } from './message/message';
 import {
   deriveNetworkMessage,
-  QueryAddrsMessage, QueryAddrsMessageData, deriveQueryAddrsMessage,
+  QueryAddrsMessage, deriveQueryAddrsMessage,
   QueryAddrsResponseMessage, QueryAddrsResponseMessageData, deriveQueryAddrsResponseMessage,
+  JoinSpaceNotificationMessageData,
 } from './message/network';
 import { MessageReceivedEvent } from './conn/base';
 import { NetworkMessageReceivedEvent } from './misc/events';
 import Identity from './misc/identity';
 import TunnelManager from './tunnel';
 import RequestManager, { RequestedEvent } from './request';
-import { joinPath, extractAddrFromPath, wait } from './misc/utils';
+import { joinPath, extractAddrFromPath, extractSpacePath, wait } from './misc/utils';
 
 declare namespace Agent {
   type Config = {
@@ -74,28 +75,32 @@ class Agent extends EventTarget<EventMap> {
     await this.router.start(this.myIdentity.addr);
   }
 
-  async connect(peerPath: string): Promise<boolean> {
+  async connect(peerPath: string, spacePath: string = ''): Promise<boolean> {
     const peerAddr = extractAddrFromPath(peerPath);
-    if (this.connManager.hasConn(peerAddr)) {
-      await this.router.addPath(peerPath);
-    } else {
+    if (!this.connManager.hasConn(peerAddr)) {
       await this.connManager.connect(peerPath, {});
-      await this.router.addPath(peerPath);
     }
+    await this.router.addPath(peerPath);
+    const notificationMessage: JoinSpaceNotificationMessageData = {
+      term: 'join-space-notification',
+    }
+    this.send(peerPath, notificationMessage, spacePath);
     return true;
   }
 
   async join(spacePath: string = ''): Promise<boolean> {
+    const space = this.router.initSpace(spacePath);
+
     let connectSpaceNeighborSucceed = false;
     let connectSpaceNeighborTried = 0;
     let addrResponse: QueryAddrsResponseMessage;
     while(!connectSpaceNeighborSucceed && connectSpaceNeighborTried < 3) {
       try {
-        addrResponse = await this.connectSpaceNeighbor(spacePath);
+        connectSpaceNeighborTried++;
+        addrResponse = await this.connectSpaceNeighbor(space);
         connectSpaceNeighborSucceed = true;
       } catch (err) {
         console.warn(`agent.ts: join: connectSpaceNeighbor failed, #${connectSpaceNeighborTried} retry in 3 secs...`, err);
-        connectSpaceNeighborTried++;
         await wait(3000);
       }
     }
@@ -105,15 +110,15 @@ class Agent extends EventTarget<EventMap> {
     let connectSpacePeersTried = 0;
     while(!connectSpacePeersSucceed && connectSpacePeersTried < 3) {
       try {
+        connectSpacePeersTried++;
         await this.connectSpacePeers(
-          spacePath,
+          space,
           addrResponse.addrs,
           extractAddrFromPath(addrResponse.srcPath),
         );
         connectSpacePeersSucceed = true;
       } catch (err) {
         console.warn(`agent.ts: join: connectSpacePeers failed, #${connectSpacePeersTried} retry in 3 secs...`, err);
-        connectSpacePeersTried++;
         await wait(3000);
       }
     }
@@ -121,25 +126,27 @@ class Agent extends EventTarget<EventMap> {
     return true;
   }
 
-  private async connectSpaceNeighbor(spacePath: string): Promise<QueryAddrsResponseMessage> {
-    const request = await this.requestManager.request(this.myIdentity.addr, makeRequestAddrMessage(spacePath));
+  private async connectSpaceNeighbor(space: Router.Space): Promise<QueryAddrsResponseMessage> {
+    const request = await this.requestManager.request(joinPath(space.path, this.myIdentity.addr), { term: 'query-addrs' });
     const addrResponse = deriveQueryAddrsResponseMessage(request.responseMessage);
 
-    await this.connect(addrResponse.srcPath);
-    await this.router.addPath(addrResponse.srcPath);
+    await this.connect(addrResponse.srcPath, space.path);
 
     return addrResponse;
   }
 
-  private async connectSpacePeers(spacePath: string, knownAddrs: string[], neighborAddr: string) {
+  private async connectSpacePeers(space: Router.Space, knownAddrs: string[], neighborPath: string) {
+    const [neighborSpace, neighborAddr] = this.router.getSpaceAndAddr(neighborPath);
+    if (neighborSpace !== space) return;
+
     const addrAndHashes = await hashLine(knownAddrs);
 
-    const existingKBuckets = this.router.buildSpaceKBuckets(spacePath);
+    const existingKBuckets = this.router.buildSpaceKBuckets(space.path);
     const responseKBuckets = this.router.buildKBuckets(addrAndHashes);
     const nextRequestKBuckets = mergeKBuckets(existingKBuckets, responseKBuckets);
     this.router.removeLines(
       nextRequestKBuckets,
-      [this.router.getLine(spacePath, neighborAddr)]
+      [this.router.getLine(space.path, neighborAddr)]
     );
 
     let nextRequestMaxK = -1;
@@ -161,7 +168,7 @@ class Agent extends EventTarget<EventMap> {
 
     await Promise.all(
       nextRequestAddrs.map(async addr => {
-        const subRequest = await this.requestManager.request(joinPath(spacePath, addr), makeRequestAddrMessage(spacePath));
+        const subRequest = await this.requestManager.request(joinPath(space.path, addr), { term: 'query-addrs' });
         const subAddrResponse = deriveQueryAddrsResponseMessage(subRequest.responseMessage);
         const addrAndHashes = await hashLine(subAddrResponse.addrs);
         connectingKBuckets = mergeKBuckets(
@@ -171,13 +178,13 @@ class Agent extends EventTarget<EventMap> {
         );
       })
     );
-    this.router.removeLines(connectingKBuckets, this.router.getSpace(spacePath).table);
+    this.router.removeLines(connectingKBuckets, space.table);
 
     const addrsToConnect = this.router.pickAddrsToConnect(connectingKBuckets, existingKBuckets);
 
     await Promise.all(
       addrsToConnect.map(addr => (
-        this.connect(joinPath(spacePath, addr))
+        this.connect(joinPath(space.path, addr), space.path)
       ))
     );
   }
@@ -187,9 +194,9 @@ class Agent extends EventTarget<EventMap> {
   listKnownAddrs(_spacePath: string) {}
   broadcast(_spacePath: string) {}
 
-  send(path: string, message: MessageData): Promise<boolean> {
+  send(path: string, message: MessageData, srcSpacePath?: string): Promise<boolean> {
     return this.route({
-      srcPath: this.myIdentity.addr,
+      srcPath: joinPath(srcSpacePath || '', this.myIdentity.addr),
       desPath: path,
       ...message,
     });
@@ -303,8 +310,21 @@ class Agent extends EventTarget<EventMap> {
       return true;
     };
 
+    let handled = false;
+    switch (event.detail.term) {
+      case 'join-space-notification':
+        handled = this.handleJoinSpaceMessage(event.detail);
+        break;
+    }
+    if (handled) return true;
+
     this.dispatchEvent(event);
     return event.defaultPrevented;
+  }
+
+  private handleJoinSpaceMessage(message: Message): boolean {
+    this.router.addPath(message.srcPath);
+    return true;
   }
 
   private async onConnClose(event: ConnCloseEvent) {
@@ -320,23 +340,23 @@ class Agent extends EventTarget<EventMap> {
   }
 
   private onRequestedAddrs(message: QueryAddrsMessage, event: RequestedEvent) {
-    const space = this.router.getSpaceAndAddr(message.desPath)[0];
+    let [space, _target, upperSpaces] = this.router.getSpaceAndAddr(message.desPath, false);
     const srcAddr = extractAddrFromPath(message.srcPath);
     const response: QueryAddrsResponseMessageData = {
       term: 'query-addrs-response',
-      addrs: [
-        ...space.table.map(line => line[1]).filter(addr => addr !== srcAddr),
-      ],
+      ...(space ? ({
+        addrs: [
+          ...space.table.map(line => line[1]).filter(addr => addr !== srcAddr),
+        ],
+        responseSpace: space.path,
+      }) : ({
+        addrs: [],
+        responseSpace: upperSpaces[upperSpaces.length - 1].path
+      })),
     };
+
     event.response(response);
   }
 }
 
 export default Agent;
-
-function makeRequestAddrMessage(spacePath: string): QueryAddrsMessageData {
-  return {
-    term: 'query-addrs',
-    spacePath,
-  };
-}

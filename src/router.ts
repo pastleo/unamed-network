@@ -1,73 +1,90 @@
 import {
-  joinPath, calcAddrOrSubSpaceHash, formatFirstUint32Hex,
-  shuffle,
+  joinPath, extractAddrFromPath, calcAddrOrSubSpaceHash,
+  formatFirstUint32Hex, shuffle,
 } from './misc/utils';
 
-type RoutingTableLine = [hash: Uint32Array, addr: string];
-type KBuckets = Map<number, RoutingTableLine[]>;
-type pathWithoutAddr = string;
-interface Space {
-  table: RoutingTableLine[];
-  path: string;
-  subSpaces: Record<pathWithoutAddr, Space>;
-}
-interface FindAddrIndexResult {
-  exact?: number;
-  left?: number;
-};
-interface RouteResult {
-  addrs: string[];
-  invalid?: boolean;
-  broadcast?: boolean;
-  mightBeForMe?: boolean;
-  notMakingProgressFromBase?: boolean;
+declare namespace Router {
+  type RoutingTableLine = [hash: Uint32Array, addr: string];
+  type KBuckets = Map<number, RoutingTableLine[]>;
+  type spacePath = string;
+  interface Space {
+    table: RoutingTableLine[];
+    name: string;
+    path: string;
+    subSpaces: Record<spacePath, Space>;
+  }
+  interface FindAddrIndexResult {
+    exact?: number;
+    left?: number;
+  }
+  interface RouteResult {
+    addrs: string[];
+    noPeers?: boolean;
+    invalid?: boolean;
+    broadcast?: boolean;
+    mightBeForMe?: boolean;
+    notMakingProgressFromBase?: boolean;
+  }
 }
 
 class Router {
   private myAddr: string;
   private myHash: Uint32Array;
-  private rootSpace: Space;
+  private rootSpace: Router.Space;
   
   async start(myAddr: string) {
     this.myAddr = myAddr;
     this.myHash = await calcAddrOrSubSpaceHash(this.myAddr);
     this.rootSpace = {
       table: [],
+      name: '',
       path: '',
       subSpaces: {},
     };
   }
 
-  initSpace(pathWithoutAddr: string) {
-    const pathSegs = pathWithoutAddr.split('>');
-    const mkSpaceP = (level: number, currentSpace: Space) => {
+  initSpace(spacePath: string): Router.Space {
+    const pathSegs = spacePath.split('>');
+    const mkSpaceP = (level: number, currentSpace: Router.Space): Router.Space => {
       const currentSpaceName = pathSegs[level];
-      if (!currentSpaceName) return;
+      if (!currentSpaceName) return currentSpace;
 
       let subSpace = currentSpace.subSpaces[currentSpaceName];
       if (!subSpace) {
         subSpace = {
           table: [],
+          name: pathSegs[level],
           path: joinPath(pathSegs.slice(0, level + 1)),
           subSpaces: {},
         };
         currentSpace.subSpaces[currentSpaceName] = subSpace;
       }
 
-      mkSpaceP(level + 1, subSpace);
+      return mkSpaceP(level + 1, subSpace);
     };
 
-    mkSpaceP(0, this.rootSpace);
+    return mkSpaceP(0, this.rootSpace);
   }
 
   async addPath(path: string) {
-    const [space, addr] = this.getSpaceAndAddr(path);
-    const hash = await calcAddrOrSubSpaceHash(addr);
+    const addr = extractAddrFromPath(path);
+    let [space, target, upperSpaces] = this.getSpaceAndAddr(path, false);
+
+    if (!space) {
+      space = upperSpaces.pop();
+    }
+    const hash = await calcAddrOrSubSpaceHash(target);
     addLine(space.table, [hash, addr]);
+
+    const addrHash = await calcAddrOrSubSpaceHash(addr);
+    while (upperSpaces.length > 0) {
+      space = upperSpaces.pop();
+      addLine(space.table, [addrHash, addr]);
+    }
   }
 
   rmAddr(addr: string) {
-    const rmAddrR = (currentSpace: Space) => {
+    const rmAddrR = (currentSpace: Router.Space) => {
       const index = currentSpace.table.findIndex(([_, lineAddr]) => lineAddr === addr);
       if (index !== -1) {
         currentSpace.table.splice(index, 1);
@@ -79,20 +96,28 @@ class Router {
     rmAddrR(this.rootSpace);
   }
 
-  getSpaceAndAddr(path: string = '', exact = true): [Space, string] {
+  getSpaceAndAddr(path: string = '', exact = true): [Router.Space, string, Router.Space[]] {
     const pathSegs = path.split('>');
     let currentSpace = this.rootSpace;
+    const upperSpaces: Router.Space[] = [];
     while (pathSegs.length > 1) {
       if (pathSegs[0]) {
+        upperSpaces.push(currentSpace);
         currentSpace = currentSpace.subSpaces[pathSegs[0]];
-        if (!currentSpace && exact) throw new Error(`router.ts: getSpaceAndAddr: space ${joinPath(pathSegs.slice(0, -1))} not exists`);
+        if (!currentSpace) {
+          if (exact) {
+            throw new Error(`router.ts: getSpaceAndAddr: space ${joinPath(pathSegs.slice(0, -1))} not exists`);
+          } else {
+            return [null, pathSegs[0], upperSpaces];
+          }
+        }
       }
       pathSegs.shift();
     }
-    return [currentSpace, pathSegs[0]];
+    return [currentSpace, pathSegs[0], upperSpaces];
   }
 
-  getSpace(spacePath: string, exact = true): Space {
+  getSpace(spacePath: string, exact = true): Router.Space {
     const pathSegs = spacePath.split('>');
     let currentSpace = this.rootSpace;
     while (pathSegs.length > 0) {
@@ -105,32 +130,46 @@ class Router {
     return currentSpace;
   }
 
-  getLine(spacePath: string, addr: string): RoutingTableLine {
+  getLine(spacePath: string, addr: string): Router.RoutingTableLine {
     const space = this.getSpace(spacePath);
     return space.table.find(line => line[1] === addr);
   }
 
   printableTable(pathWithAddr: string) {
-    return this.getSpaceAndAddr(pathWithAddr, true)[0].table.map(
-      ([hash, addr]) => `${formatFirstUint32Hex(hash)} : ${addr}`
-    ).join('\n') + '\n'
+    const [space] = this.getSpaceAndAddr(pathWithAddr, false);
+    if (space)
+      return this.getSpaceAndAddr(pathWithAddr, true)[0].table.map(
+        ([hash, addr]) => `${formatFirstUint32Hex(hash)} : ${addr}`
+      ).join('\n') + '\n'
+    else return ' (( space not exists )) ';
   }
 
-  async route(desPath: string, baseAddr?: string): Promise<RouteResult> {
-    const [space, target] = this.getSpaceAndAddr(desPath, false);
+  async route(desPath: string, baseAddr?: string): Promise<Router.RouteResult> {
+    let [space, target, upperSpaces] = this.getSpaceAndAddr(desPath, false);
+
+    if (!space) {
+      space = upperSpaces.pop();
+    }
+    while (space.table.length === 0 && upperSpaces.length > 0) {
+      target = space.name;
+      space = upperSpaces.pop();
+    }
 
     if (!target) {
       console.warn(`desPath: '${desPath}' does not have a valid target`);
       return { invalid: true, addrs: [] }
     }
-    if (target === '*') { // broadcast
+    if (target === '*' && space.path !== '') { // broadcast
       return {
         broadcast: true,
         addrs: space.table.map(line => line[1]).filter(addr => addr !== baseAddr),
       };
     }
     if (space.table.length === 0) {
-      return { addrs: [] };
+      return {
+        addrs: [],
+        noPeers: true,
+      };
     }
 
     const targetHash = await calcAddrOrSubSpaceHash(target);
@@ -165,15 +204,15 @@ class Router {
     return result;
   }
 
-  buildSpaceKBuckets(spacePath: string): KBuckets {
+  buildSpaceKBuckets(spacePath: string): Router.KBuckets {
     return this.buildKBuckets(this.getSpace(spacePath).table);
   }
 
-  buildKBuckets(lines: RoutingTableLine[]): KBuckets {
-    const kBuckets: KBuckets = new Map();
+  buildKBuckets(lines: Router.RoutingTableLine[]): Router.KBuckets {
+    const kBuckets: Router.KBuckets = new Map();
     lines.forEach(addrAndHash => {
       const k = sameBitsUint32Array(this.myHash, addrAndHash[0]);
-      let bucket: RoutingTableLine[] = kBuckets.get(k);
+      let bucket: Router.RoutingTableLine[] = kBuckets.get(k);
       if (bucket === undefined) {
         bucket = [];
         kBuckets.set(k, bucket);
@@ -190,8 +229,8 @@ class Router {
     dbgLines('me', [[this.myHash, this.myAddr]]);
   }
   
-  removeLines(kBuckets: KBuckets, lines: RoutingTableLine[]): void {
-    [...lines, [this.myHash, this.myAddr] as RoutingTableLine].forEach(([hash, _addr]) => {
+  removeLines(kBuckets: Router.KBuckets, lines: Router.RoutingTableLine[]): void {
+    [...lines, [this.myHash, this.myAddr] as Router.RoutingTableLine].forEach(([hash, _addr]) => {
       const k = sameBitsUint32Array(this.myHash, hash);
       const bucket = kBuckets.get(k);
       if (bucket) {
@@ -206,7 +245,7 @@ class Router {
     });
   }
 
-  pickAddrsToConnect(kBuckets: KBuckets, existingKBuckets: KBuckets): string[] {
+  pickAddrsToConnect(kBuckets: Router.KBuckets, existingKBuckets: Router.KBuckets): string[] {
     const addrs: string[] = [];
     kBuckets.forEach((lines, k) => {
       const allowedNewLines = k < 3 ? 3 - k : 1;
@@ -249,15 +288,15 @@ function sameBitsUint32Array(arr1: Uint32Array, arr2: Uint32Array): number {
   return sameBits;
 }
 
-export function hashLine(addrs: string[]): Promise<RoutingTableLine[]> {
+export function hashLine(addrs: string[]): Promise<Router.RoutingTableLine[]> {
   return Promise.all(
-    addrs.map(async (addr): Promise<RoutingTableLine> => ([
+    addrs.map(async (addr): Promise<Router.RoutingTableLine> => ([
       await calcAddrOrSubSpaceHash(addr), addr
     ]))
   );
 }
 
-function findHashIndex(lines: RoutingTableLine[], hash: Uint32Array): FindAddrIndexResult {
+function findHashIndex(lines: Router.RoutingTableLine[], hash: Uint32Array): Router.FindAddrIndexResult {
   let left = 0, right = lines.length;
   while (left !== right) {
     const middle = Math.floor((left + right) / 2);
@@ -271,11 +310,11 @@ function findHashIndex(lines: RoutingTableLine[], hash: Uint32Array): FindAddrIn
   return { left };
 }
 
-export function mergeKBuckets(...kBucketsArr: KBuckets[]): KBuckets {
-  const newKBuckets: KBuckets = new Map();
+export function mergeKBuckets(...kBucketsArr: Router.KBuckets[]): Router.KBuckets {
+  const newKBuckets: Router.KBuckets = new Map();
   kBucketsArr.forEach(kBuckets => {
     kBuckets.forEach((lines, k) => {
-      let bucket: RoutingTableLine[] = newKBuckets.get(k);
+      let bucket: Router.RoutingTableLine[] = newKBuckets.get(k);
       if (bucket === undefined) {
         bucket = [];
         newKBuckets.set(k, bucket);
@@ -290,13 +329,13 @@ export function mergeKBuckets(...kBucketsArr: KBuckets[]): KBuckets {
   return newKBuckets;
 }
 
-function addLine(lines: RoutingTableLine[], line: RoutingTableLine): void {
+function addLine(lines: Router.RoutingTableLine[], line: Router.RoutingTableLine): void {
   const { exact, left } = findHashIndex(lines, line[0]);
   if (exact !== undefined) return;
   lines.splice(left, 0, line);
 }
 
-export function dbgLines(name: string, lines: RoutingTableLine[]) {
+export function dbgLines(name: string, lines: Router.RoutingTableLine[]) {
   console.group(name);
   console.log(
     lines.map(([hash, addr]) => `${formatFirstUint32Hex(hash)} :: ${addr}`).join('\n')
@@ -304,7 +343,7 @@ export function dbgLines(name: string, lines: RoutingTableLine[]) {
   console.groupEnd();
 }
 
-export function dbgKBuckets(name: string, kBuckets: KBuckets): void {
+export function dbgKBuckets(name: string, kBuckets: Router.KBuckets): void {
   console.group(name);
   kBuckets.forEach((lines, k) => {
     dbgLines(k.toString(), lines);

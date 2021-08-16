@@ -16,6 +16,10 @@ export function extractAddrFromPath(path: string): string {
   return path.split('>').slice(-1)[0];
 }
 
+export function extractSpacePath(path: string): string {
+  return path.split('>').slice(0, -1).join('>');
+}
+
 export function joinPath(path: string | string[], target: string = ''): string {
   const pathSegs: string[] = Array.isArray(path) ? path : [path];
   return [ ...pathSegs, target ].filter(seg => seg.length > 0).join('>');

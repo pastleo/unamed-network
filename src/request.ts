@@ -10,8 +10,11 @@ declare namespace Request {
     requestId: string;
     direction: Direction;
   }
+  export interface ResponseMessageData extends OriMessageData {
+    responseSpace?: string;
+  }
   type Message = OriMessage & MessageFields;
-  type MessageData = OriMessageData & MessageFields;
+  type RequestMessageData = OriMessageData & MessageFields;
 
   interface ManagerConfig {
     timeout: number;
@@ -24,9 +27,9 @@ declare namespace Request {
 
 export class RequestedEvent extends NetworkMessageReceivedEvent {
   type = 'requested'
-  responseData?: Promise<OriMessageData>;
+  responseData?: Promise<Request.ResponseMessageData>;
 
-  response(message: OriMessageData | Promise<OriMessageData>) {
+  response(message: Request.ResponseMessageData | Promise<Request.ResponseMessageData>) {
     this.responseData = (async () => await message)();
   }
 }
@@ -77,13 +80,14 @@ class RequestManager extends EventTarget<EventMap> {
 
     if (requestedEvent.responseData) {
       (async () => {
-        const responseMessage: Request.MessageData = {
-          ...(await requestedEvent.responseData),
+        const responseData = await requestedEvent.responseData;
+        const responseMessage: Request.RequestMessageData = {
+          ...responseData,
           requestId: message.requestId,
           direction: Request.Direction.Response,
         };
 
-        this.agent.send(event.detail.srcPath, responseMessage);
+        this.agent.send(event.detail.srcPath, responseMessage, responseData.responseSpace);
       })();
       return true;
     }
@@ -137,7 +141,7 @@ export default RequestManager;
 class Request {
   desPath: string;
   requestId: string;
-  requestMessage: Request.MessageData;
+  requestMessage: Request.RequestMessageData;
   responseMessage: Request.Message;
   private resolveFn: (req: Request) => void;
 
@@ -165,3 +169,5 @@ class Request {
     this.resolveFn(this);
   }
 }
+
+export { Request };
