@@ -2,18 +2,12 @@
   "name": "unnamed-network",
   "version": "0.0.2",
   "description": "unnamed network",
-  "type": "module",
-  "exports": {},
-  "directories": {
-    "lib": "lib"
-  },
+  "main": "dist/unnamed-network.js",
+  "types": "dist/unnamed-network.d.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "browser-agent-devserver": "webpack serve --config webpack.config.js",
-    "browser-agent": "webpack serve --open --config webpack.config.js",
-    "node-agent": "TARGET=node webpack --config webpack.config.js && node ./dist/demo-node.cjs",
-    "bundle-browser": "webpack --config webpack.config.js",
-    "bundle-node": "TARGET=node webpack --config webpack.config.js"
+    "browser-dev": "TARGET=browser-dev webpack serve --config webpack.config.js",
+    "node-dev": "TARGET=node-dev webpack --config webpack.config.js && node --enable-source-maps ./dist/node-dev.js",
+    "dist": "TARGET=dist webpack --config webpack.config.js && dts-bundle --name unnamed-network --main dist/src/index.d.ts --out ../unnamed-network.d.ts"
   },
   "repository": {
     "type": "git",
@@ -31,7 +25,7 @@
     "webpack-cli": "^4.7.2",
     "webpack-dev-server": "^3.11.2"
   },
-  "dependencies": {
+  "peerDependencies": {
     "isomorphic-webcrypto": "^2.3.8",
     "ws": "^6.2.2"
   }

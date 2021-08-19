@@ -1,12 +1,24 @@
-import Agent from 'unnamed-network/agent';
-import BrowserConnManager from 'unnamed-network/conn-manager/browser';
+import Agent from '../agent';
+import WssConnManager from '../conn-manager/wss';
+import repl from 'repl';
 
 import { PingMessage } from '../message/network';
 import { ping, handleRequest } from './share';
 
-const connManager = new BrowserConnManager();
-const agent = new Agent(connManager);
-(window as any).agent = agent;
+process.on('uncaughtException', err => {
+  console.log('Caught exception: ', err);
+});
+
+const serverOpts: WssConnManager.ServerOptions = {};
+if (process.env.HOST) serverOpts.host = process.env.HOST;
+if (process.env.PORT) serverOpts.port = parseInt(process.env.PORT);
+
+const connManager = new WssConnManager({}, serverOpts);
+
+const agent = new Agent(connManager, {
+  myAddr: process.env.ADDR || 'ws://localhost:8081',
+});
+(global as any).agent = agent;
 
 (async () => {
   // DEV monitor:
@@ -32,15 +44,7 @@ const agent = new Agent(connManager);
   await agent.start();
   console.log('agent started', agent.myIdentity.addr);
 
-  await agent.connect('ws://localhost:8081');
-  //const joinResult = await agent.join();
-  console.log('agent connected');
-
-  const aLink = document.createElement('a');
-  aLink.href = location.href;
-  aLink.target = '_blank';
-  aLink.textContent = location.href;
-  document.body.appendChild(aLink);
+  repl.start({ prompt: '> ' });
 })();
 
-(window as any).ping = (desAddr: string) => ping(agent, desAddr);
+(global as any).ping = (desAddr: string) => ping(agent, desAddr);

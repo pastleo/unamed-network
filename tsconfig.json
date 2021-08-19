@@ -4,15 +4,13 @@
     "noImplicitAny": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "module": "es6",
-    "target": "es5",
-    "lib": ["DOM", "es2019"],
+    "module": "es2015",
+    "target": "es2019",
+    "lib": ["dom", "es2019"],
     "allowJs": true,
     "moduleResolution": "node",
     "outDir": "./dist/",
     "baseUrl": "src",
-    "paths": {
-      "unnamed-network/*" : ["*"]
-    }
+    "declaration": true
   }
 }

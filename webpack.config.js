@@ -1,14 +1,9 @@
-import path from 'path';
-import { fileURLToPath } from 'url';
-import HtmlWebpackPlugin from 'html-webpack-plugin';
+const path = require('path');
+const HtmlWebpackPlugin = require('html-webpack-plugin');
 
-const mode = process.env.NODE_ENV ? 'production' : 'development';
-const target = process.env.TARGET || 'web';
-
-const pathTo = target => path.resolve(path.dirname(fileURLToPath(import.meta.url)), target);
+const pathTo = target => path.resolve(__dirname, target);
 
 const webpackSharedConfig = {
-  mode, target,
   module: {
     rules: [
       {
@@ -28,16 +23,18 @@ const webpackSharedConfig = {
 };
 
 const webpackConfigs = {
-  web: {
+  'browser-dev': {
     ...webpackSharedConfig,
-    entry: { 'demo-browser': './src/demo/browser.ts' },
+    mode: 'development',
+    target: 'web',
+    entry: { 'browser-dev': './src/dev/browser.ts' },
     plugins: [
       new HtmlWebpackPlugin({
-        title: 'unnamed-network demo',
+        title: 'unnamed-network dev',
       }),
     ],
     output: {
-      filename: '[name].[contenthash].js',
+      filename: '[name].js',
       path: pathTo('dist'),
     },
     devtool: 'inline-source-map',
@@ -47,18 +44,38 @@ const webpackConfigs = {
       },
     },
   },
-  node: {
+  'node-dev': {
     ...webpackSharedConfig,
-    entry: { 'demo-node': './src/demo/node.ts' },
+    mode: 'development',
+    target: 'node',
+    entry: { 'node-dev': './src/dev/node.ts' },
     output: {
-      filename: '[name].cjs',
+      filename: '[name].js',
       path: pathTo('dist'),
     },
     externals: [{
-      'utf-8-validate': 'commonjs utf-8-validate',
-      bufferutil: 'commonjs bufferutil',
+      'isomorphic-webcrypto': 'commonjs isomorphic-webcrypto',
+      'ws': 'commonjs ws',
     }],
   },
+  'dist': {
+    ...webpackSharedConfig,
+    mode: 'development',
+    entry: {
+      'unnamed-network': './src/index.ts',
+    },
+    output: {
+      filename: '[name].js',
+      path: pathTo('dist'),
+      library: {
+        type: 'commonjs-module',
+      }
+    },
+    externals: [{
+      'isomorphic-webcrypto': 'commonjs isomorphic-webcrypto',
+      'ws': 'commonjs ws',
+    }],
+  }
 };
 
-export default webpackConfigs[target];
+module.exports = webpackConfigs[process.env.TARGET || 'node-dev'];
