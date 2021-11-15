@@ -3,6 +3,8 @@ const WS = require('libp2p-websockets');
 const filters = require('libp2p-websockets/src/filters');
 const transportKey = WS.prototype[Symbol.toStringTag];
 
+const UnamedNetwork = require('./unamed-network');
+
 const { DEV_KNOWN_SERVICE_ADDRS } = require('./dev-env');
 
 async function main() {
@@ -29,6 +31,13 @@ async function main() {
 
   window.ipfs = ipfs;
   console.log('window.ipfs created:', window.ipfs);
+
+  const unamedNetwork = new UnamedNetwork(ipfs);
+  window.unamedNetwork = unamedNetwork;
+  console.log('window.unamedNetwork created:', window.unamedNetwork);
+
+  await unamedNetwork.start();
+  console.log('unamedNetwork started, unamedNetwork.idInfo:', unamedNetwork.idInfo);
 }
 
 main();
