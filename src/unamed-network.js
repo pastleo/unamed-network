@@ -8,11 +8,10 @@ const crypto = require('libp2p-crypto');
 const { sha256 } = require('multiformats/hashes/sha2');
 
 const PUBSUB_TOPIC_PREFIX = 'unamed-network/';
-const PROTOCOL_VERSION = '0.0.1';
+const PROTOCOL = 'unamed-network/0.0.1';
 const DEFAULT_KNOWN_SERVICE_NODES = [
   '/ip4/127.0.0.1/tcp/4005/ws/p2p/12D3KooWMg1RMxFkAGGEW9RS66M4sCqz8BePeXMVwTPBjw4oBjR2'
 ];
-const MULTIHASH_ALG = 'sha1';
 const SERVICE_NODE_ADDR_PROTO_NAMES = ['ws', 'wss']; // for dev, production should be 'wss' only.
 
 class UnamedNetwork extends EventEmitter {
@@ -22,7 +21,8 @@ class UnamedNetwork extends EventEmitter {
     this.ipfs = ipfs;
     this.rooms = new Map(); // joined
     this.peers = new Map();
-    this.waitingResolves = new Map();
+    this.requestResolveRejects = new Map();
+    this.started = false;
     this.kBucket = new KBucket({ // known rooms
       numberOfNodesPerKBucket: 2,
       arbiter: (incumbent, candidate) => this.kBucketArbiter(incumbent, candidate),
@@ -48,14 +48,16 @@ class UnamedNetwork extends EventEmitter {
         console.error(e);
       }
     });
-    if (this.nodeType === 'serviceNode') {
-      await this.join(this.idInfo.id);
-    }
 
     this.knownServiceNodes = knownServiceNodes.filter(addr => addr.indexOf(this.idInfo.id) === -1);
     await Promise.all(
       shuffle(this.knownServiceNodes).slice(-3).map(addr => this.connectAddr(addr))
     );
+
+    if (this.nodeType === 'serviceNode') {
+      await this.join(this.idInfo.id);
+    }
+    this.started = true;
   }
 
   async join(roomName) {
@@ -72,20 +74,26 @@ class UnamedNetwork extends EventEmitter {
       name: roomName,
     });
 
-    const packet = this.createInternetPacket(roomNameHash, {
-      type: 'join',
-      roomName,
+    const findResPacket = await this.findRoom(roomNameHash, roomName);
+
+    this.peers.forEach(peer => {
+      this.ping(peer); // not awaiting for pong for speed
     });
-    const peer = this.routeInternet(packet);
 
-    //const response = await new Promise(resolve => {
-      //this.queryPacketIds.set(
-        //packet.packetId,
-        //resolve
-      //);
+    if (!findResPacket) return;
 
-      //const peer =
-    //});
+    // TODO: connect to peers near targetRoom
+
+    if (!findResPacket.found) {
+      return this.logIfStarted(`room '${roomName}' not found, this node is the only member. (might need to retry a couple of times)`);
+    }
+
+    console.log('join: room found!', { findResPacket });
+
+    // TODO: room is found, then:
+    // * [ ] connect to the replied peer
+    // * [ ] send join request to the peer
+    // * [ ] using replied join packet to connect to all other peers in the room
   }
 
   // =================
@@ -93,42 +101,6 @@ class UnamedNetwork extends EventEmitter {
   kBucketArbiter(incumbent, candidate) {
     console.warn('kBucketArbiter: should not be called, returning incumbent', { incumbent, candidate })
     return incumbent;
-  }
-
-  handleSelfSubPacket(data) {
-    if (data.from === this.idInfo.id) return;
-
-    const dataStr = BufferUtils.toString(data.data);
-    console.log(`handleSelfSubPacket: from ${data.from}: ${dataStr}`)
-
-    let packet = null;
-    try {
-      packet = JSON.parse(dataStr);
-    } catch (e) {}
-    if (packet === null) return;
-
-		this.handleJsonPackageForMe(data.from, packet);
-  }
-
-  handleJsonPackageForMe(from, packet) {
-    switch(packet.type) {
-      case 'ping':
-        return this.handlePing(from, packet);
-      case 'pong':
-        return this.handleResponsePacket(from, packet);
-      case 'signal':
-        break;
-    }
-  }
-
-  handlePing(from, packet) {
-    this.setPeer(from, packet);
-    const pongPacket = this.createPacket({
-      type: 'pong',
-      nodeType: this.nodeType,
-      roomNameHashes: [...this.rooms.keys()],
-    });
-    this.respondPacket(packet, this.peers.get(from), pongPacket);
   }
 
   setPeer(peerId, payload) {
@@ -196,35 +168,229 @@ class UnamedNetwork extends EventEmitter {
     }
   }
 
+  handleSelfSubPacket(data) {
+    if (data.from === this.idInfo.id) return;
+
+    const dataStr = BufferUtils.toString(data.data);
+    console.log(`handleSelfSubPacket: from ${data.from}: ${dataStr}`)
+
+    let packet;
+    try {
+      packet = JSON.parse(dataStr);
+    } catch (error) {
+      return console.warn(`handleSelfSubPacket: not valid json from ${data.from}: ${dataStr}`, error);
+    }
+
+    this.handlePacket(data.from, packet);
+  }
+
+  handlePacket(from, packet) {
+    if (packet.protocol !== PROTOCOL) {
+      return console.warn(`handlePacket: unexpected protocol '${packet.protocol}', currently using '${PROTOCOL}'`);
+    }
+
+    switch(packet.type) {
+      case 'ping':
+        return this.handlePingPacket(from, packet);
+      case 'pong':
+        return this.handleResponsePacket(from, packet);
+      case 'find':
+        return this.handleFindPacket(from, packet);
+      case 'findRes':
+        return this.handleInternetPacket(from, packet) || this.handleResponsePacket(from, packet);
+      case 'signal':
+        break;
+    }
+  }
+
+  handleInternetPacket(_from, packet) {
+    if (
+      packet.route.length === (packet.hop + 1) &&
+      packet.route[packet.hop] === this.idInfo.id
+    ) {
+      return false;
+    }
+
+    this.sendInternetPacket(packet);
+    return true;
+  }
+
+  handlePingPacket(from, packet) {
+    this.setPeer(from, packet);
+    const pongPacket = this.createPacket({
+      type: 'pong',
+      nodeType: this.nodeType,
+      roomNameHashes: [...this.rooms.keys()],
+    });
+    this.respond(packet, pongPacket);
+    this.sendPacket(this.peers.get(from), pongPacket);
+    return true;
+  }
+
+  handleFindPacket(_from, packet) {
+    if (this.rooms.has(packet.targetHash)) {
+      const foundPacket = this.createInternetPacket(
+        [...packet.fromPath, this.idInfo.id].reverse(),
+        {
+          type: 'findRes',
+          found: true,
+          roomName: this.rooms.get(packet.targetHash).name, // for dbg
+        },
+      );
+
+      this.respond(packet, foundPacket);
+      this.sendInternetPacket(foundPacket);
+      return true;
+    }
+
+    this.routeAndSendFindPacket(packet);
+    return true;
+  }
+
   createPacket(content) {
     return {
       ...content,
-      protocol: PROTOCOL_VERSION,
+      protocol: PROTOCOL,
       packetId: randomId(),
     }
   }
 
-  createInternetPacket(targetHash, content) {
+  createInternetPacket(route, content) {
     return {
       ...this.createPacket(content),
-      targetHash,
-      fromPath: [this.idInfo.id],
+      route,
+      hop: 0,
     }
-  }
-
-  routeInternet(packet) {
-    const targetHashBuffer = BufferUtils.fromString(packet.targetHash);
-    const rooms = this.kBucket.closest(targetHashBuffer, 2).filter(room => room.peers.size > 0);
-    console.log('WIP: routeInternet', rooms);
   }
 
   async sendPacket(peer, packet) {
     if ([this.nodeType, peer.nodeType].indexOf('serviceNode') !== -1) {
       await this.ipfs.pubsub.publish(`${PUBSUB_TOPIC_PREFIX}/${peer.peerId}`, JSON.stringify(packet));
     } else if (peer.rtcPeer) {
+      // WIP
     } else {
       throw new Error('sendPacket: peer is not serviceNode nor rtcPeer');
     }
+  }
+
+  async sendInternetPacket(packet) {
+    if (packet.route[packet.hop] !== this.idInfo.id) {
+      console.warn('sendInternetPacket: current hop pointing peerId is not self', { packet });
+      return;
+    }
+
+    const nextHop = packet.hop + 1;
+    const peerId = packet.route[nextHop];
+    const peer = this.peers.get(peerId);
+
+    if (!peer) {
+      console.warn('sendInternetPacket: peer not found, sending InternetNoPeerPacket', { packet });
+      const noPeerPacket = this.createInternetPacket(
+        packet.route.slice(0, packet.hop).reverse(),
+        {
+          type: 'noPeer',
+          oriPacketId: packet.packetId,
+        }
+      );
+      this.sendInternetPacket(noPeerPacket);
+      return;
+    }
+
+    packet.hop = nextHop;
+    this.sendPacket(peer, packet);
+  }
+
+  async ping(peer) {
+    const packet = this.createPacket({
+      type: 'ping',
+      nodeType: this.nodeType,
+      roomNameHashes: [...this.rooms.keys()],
+    });
+    const pongRequest = this.request(packet);
+    this.sendPacket(peer, packet);
+    const pongPacket = await pongRequest;
+    this.setPeer(peer.peerId, pongPacket);
+  }
+
+  async findRoom(roomNameHash, roomName) {
+    //const packet = this.createFindPacket(roomNameHash, roomName);
+    const packet =  this.createPacket({
+      type: 'find',
+      targetHash: roomNameHash,
+      fromPath: [],
+      lastDistance: Infinity, // Infinity cannot be encode in JSON, but it should and will be updated in routeAndSendFindPacket
+
+      roomName, // for dbg
+    });
+
+    try {
+      const findRequest = this.request(packet);
+      this.routeAndSendFindPacket(packet);
+      return await findRequest;
+    } catch (error) {
+      this.warnIfStarted('join: find request failed: ', error);
+      return null;
+    }
+  }
+
+  createFindPacket(roomNameHash, roomName) {
+    return this.createPacket({
+      type: 'find',
+      targetHash: roomNameHash,
+      fromPath: [],
+      lastDistance: Infinity, // Infinity cannot be encode in JSON, but it should and will be updated in routeAndSendFindPacket
+
+      roomName, // for dbg
+    });
+  }
+
+  routeAndSendFindPacket(packet) {
+    const targetHashBuffer = BufferUtils.fromString(packet.targetHash, 'base64');
+
+    const room = this.kBucket.closest(targetHashBuffer, 1)[0];
+
+    if (!room) {
+      return this.routeFindPacketFailed(packet, 'routeAndSendFindPacket: no room in kBucket');
+    }
+
+    const distance = KBucket.distance(room.id, targetHashBuffer);
+    if (distance > packet.lastDistance) {
+      return this.routeFindPacketFailed(packet, 'routeAndSendFindPacket: cannot find smaller distance between target');
+    }
+
+    const peerId = sample(
+      [...room.peers].filter(id => packet.fromPath.indexOf(id) === -1)
+    );
+
+    if (!peerId) {
+      return this.routeFindPacketFailed(packet, 'routeAndSendFindPacket: no peer in room available');
+    }
+    const peer = this.peers.get(peerId);
+
+    packet.fromPath.push(this.idInfo.id);
+    packet.lastDistance = distance;
+
+    this.sendPacket(peer, packet)
+  }
+
+  routeFindPacketFailed(packet, reason) {
+    this.warnIfStarted(reason);
+
+    if (packet.fromPath.length <= 0) {
+      // make self requested find to stop
+      return this.cancelRequest(packet, new Error(`canceled: not even be able to send out, which means this node is the only node in the known network. (originally: ${reason})`));
+    }
+
+    const notFoundPacket = this.createInternetPacket(
+      [...packet.fromPath, this.idInfo.id].reverse(),
+      {
+        type: 'findRes',
+        found: false,
+      },
+    );
+
+    this.respond(packet, notFoundPacket);
+    this.sendInternetPacket(notFoundPacket);
   }
 
   async connectWebrtc(peerId) {
@@ -262,54 +428,67 @@ class UnamedNetwork extends EventEmitter {
       nodeType: 'serviceNode',
     }
 
-    const packet = this.createPacket({
-      type: 'ping',
-      nodeType: this.nodeType,
-      roomNameHashes: [...this.rooms.keys()],
-    });
-    const pongPacket = await this.sendAndWaitForPacket('pong', peer, packet);
-    this.setPeer(peerId, pongPacket);
+    await this.ping(peer);
   }
 
-  getWaitingId(type, packet) {
-    return [type, packet.reqId].join('/');
-  }
-  sendAndWaitForPacket(responsePacketType, peer, packet) {
-    const reqId = randomId();
-    const reqPacket = { ...packet, reqId };
-    const waitingId = this.getWaitingId(responsePacketType, reqPacket);
-    return new Promise(resolve => {
-      this.waitingResolves.set(waitingId, resolve);
-      this.sendPacket(peer, reqPacket);
+  request(packet, timeout = 5000) {
+    packet.reqId = randomId();
+    const promise = new Promise((resolve, reject) => {
+      this.requestResolveRejects.set(packet.reqId, [resolve, reject]);
     });
+
+    setTimeout(() => {
+      const request = this.requestResolveRejects.get(packet.reqId);
+      if (request) {
+        const [_, reject] = request;
+        reject(
+          new Error(`request: timeout for ${packet.reqId}`, { packet })
+        );
+      }
+    }, timeout);
+
+    return promise;
   }
-  respondPacket(reqPacket, peer, packet) {
-    this.sendPacket(peer, { reqId: reqPacket.reqId, ...packet });
+  respond(reqPacket, packet) {
+    packet.reqId = reqPacket.reqId;
   }
-  handleResponsePacket(_from, packet) {
-    const waitingId = this.getWaitingId(packet.type, packet);
-    const resolve = this.waitingResolves.get(waitingId);
-    if (resolve) resolve(packet);
+  popRequest(packet) {
+    const request = this.requestResolveRejects.get(packet.reqId);
+    if (request) {
+      this.requestResolveRejects.delete(packet.reqId);
+      return request;
+    }
+    return []; // allow array destruction
+  }
+  cancelRequest(reqPacket, reason) {
+    const [_, reject] = this.popRequest(reqPacket);
+    if (reject) reject(reason);
+  }
+  handleResponsePacket(_from, resPacket) {
+    const [resolve] = this.popRequest(resPacket);
+    if (!resolve) return false;
+    resolve(resPacket);
+    return true;
+  }
+
+  logIfStarted(...message) {
+    if (this.started) {
+      console.log(...message);
+    }
+  }
+  warnIfStarted(...message) {
+    if (this.started) {
+      console.warn(...message);
+    }
   }
 
   // TODO: remove:
-  testKBucket() {
-    const otherIdBuffer1 = PeerId.parse('12D3KooWJMXrVovsCuU1czeowx2xGizUipkiHBgHbUQ1dAD3UbCK').toBytes().slice(6);
-    const otherIdBuffer2 = PeerId.parse('12D3KooWJMb4m8HjfJVHnBc9T5rWYkvn9BBtgRV6bYqGWnJCXf7j').toBytes().slice(6);
-    console.log({
-      otherIdBuffer1, otherIdBuffer2,
-    });
-
-    this.kBucket.add({ id: otherIdBuffer1, name: 'otherIdBuffer1' });
-    this.kBucket.add({ id: otherIdBuffer2, name: 'otherIdBuffer2' });
-    console.log(this.kBucket);
-    console.log(
-      this.kBucket.closest(new Uint8Array([126, 221, 53]), 1),
-      this.kBucket.root
-    );
+  testSomeStuff() {
+    // this doesn't work on repl, but work in code?
+    console.log('BufferUtils.toString', BufferUtils.toString(new Uint8Array([0]), 'base64'));
   }
 
-  handleJsonPackageForMeOld(from, json) {
+  handlePacketOld(from, json) {
     let peer = this.peers[from];
     switch(json.type) {
       case 'hello':
@@ -360,6 +539,9 @@ function shuffle(oriArray) {
     [array[i], array[j]] = [array[j], array[i]];
   }
   return array;
+}
+function sample(array) {
+  return array[Math.floor(array.length * Math.random())];
 }
 async function hash(buf) {
   return (await sha256.digest(buf)).digest;
