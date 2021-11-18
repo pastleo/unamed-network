@@ -1,7 +1,7 @@
 const { EventEmitter } = require('events');
 const KBucket = require('k-bucket');
+const debug = require('debug');
 //const { multiaddr } = require('multiaddr');
-const PeerId = require('peer-id');
 const BufferUtils = require('uint8arrays');
 const SimplePeer = require('libp2p-webrtc-peer');
 const crypto = require('libp2p-crypto');
@@ -9,39 +9,59 @@ const { sha256 } = require('multiformats/hashes/sha2');
 
 const PUBSUB_TOPIC_PREFIX = 'unamed-network/';
 const PROTOCOL = 'unamed-network/0.0.1';
+const K_BUCKET_OPTIONS_SERVICE_NODE = {
+  numberOfNodesPerKBucket: 20,
+}
+const K_BUCKET_OPTIONS_CLIENT_NODE = {
+  numberOfNodesPerKBucket: 2,
+}
+const EPHEMERAL_ALG = 'P-256';
+const EPHEMERAL_STRETCHER_CIPHER_TYPE = 'AES-128';
+const EPHEMERAL_STRETCHER_HASH_TYPE = 'SHA1';
 const DEFAULT_KNOWN_SERVICE_NODES = [
   '/ip4/127.0.0.1/tcp/4005/ws/p2p/12D3KooWMg1RMxFkAGGEW9RS66M4sCqz8BePeXMVwTPBjw4oBjR2'
 ];
-const SERVICE_NODE_ADDR_PROTO_NAMES = ['ws', 'wss']; // for dev, production should be 'wss' only.
+
+const dbg = ns => debug(`unamedNetwork:${ns}`);
+const logger = {
+  packet: dbg('packet'),
+  packetContent: dbg('packet:content'),
+  join: dbg('join'),
+  start: dbg('start'),
+  kBucket: dbg('kBucket'),
+  routeFind: dbg('routeFind'),
+  conn: dbg('conn'),
+  addrConn: dbg('addrConn'),
+  webrtcConn: dbg('webrtcConn'),
+}
 
 class UnamedNetwork extends EventEmitter {
   constructor(ipfs, nodeType) {
     super();
     this.nodeType = nodeType;
     this.ipfs = ipfs;
-    this.rooms = new Map(); // joined
+    this.rooms = new Map();
+    this.primaryRoomNameHash = null;
     this.peers = new Map();
+    this.initKBucket(null);
+
     this.requestResolveRejects = new Map();
     this.started = false;
-    this.kBucket = new KBucket({ // known rooms
-      numberOfNodesPerKBucket: 2,
-      arbiter: (incumbent, candidate) => this.kBucketArbiter(incumbent, candidate),
-      //localNodeId: idBuffer
-    });
   }
 
   async start(knownServiceNodes = DEFAULT_KNOWN_SERVICE_NODES) {
     this.idInfo = await this.ipfs.id();
-    this.nodeAddrs = this.idInfo.addresses.filter(
-      addr => addr.protos().find(proto => SERVICE_NODE_ADDR_PROTO_NAMES.indexOf(proto.name) >= 0)
+    this.addrs = this.idInfo.addresses.filter(
+      addr => addr.protos().find(proto => ['ws', 'wss'].indexOf(proto.name) >= 0)
+      // TODO: only WAN address and wss only
     );
-    this.nodeType = this.nodeAddrs.length > 0 ? 'serviceNode' : 'clientNode';
+    this.nodeType = this.addrs.length > 0 ? 'serviceNode' : 'clientNode';
 
     if (this.nodeType === 'clientNode' && !SimplePeer.WEBRTC_SUPPORT) {
-      throw new Error(`UnamedNetwork.start: capabitlity not satisfied! no public address for ${SERVICE_NODE_ADDR_PROTO_NAMES.join(', ')} nor webRTC available.`);
+      throw new Error(`UnamedNetwork.start: capabitlity not satisfied! no public wss addr nor webRTC available.`);
     }
 
-    await this.ipfs.pubsub.subscribe(`${PUBSUB_TOPIC_PREFIX}/${this.idInfo.id}`, packet => {
+    await this.ipfs.pubsub.subscribe(pubsubLinkTopic(this.idInfo.id), packet => {
       try { // pubsub.subscribe is muting errors
         this.handleSelfSubPacket(packet);
       } catch (e) {
@@ -51,23 +71,32 @@ class UnamedNetwork extends EventEmitter {
 
     this.knownServiceNodes = knownServiceNodes.filter(addr => addr.indexOf(this.idInfo.id) === -1);
     await Promise.all(
-      shuffle(this.knownServiceNodes).slice(-3).map(addr => this.connectAddr(addr))
+      shuffle(this.knownServiceNodes).slice(-3).map(addr => this.connectAddr([addr]))
     );
 
     if (this.nodeType === 'serviceNode') {
-      await this.join(this.idInfo.id);
+      try {
+        await this.join(this.idInfo.id);
+      } catch (errorNotSurprised) {
+        logger.start(errorNotSurprised);
+      }
     }
     this.started = true;
   }
 
-  async join(roomName) {
+  async join(roomName, makePrimary = false) { // return if room has other peers
     if (roomName.length < 3) throw new Error('room name have to be more than 3 characters');
 
     const roomNameHash = BufferUtils.toString(
       await hash(BufferUtils.fromString(roomName)),
       'base64',
     );
-    if (this.rooms.has(roomNameHash)) return true;
+    if (this.getRoomJoined(roomNameHash)) return true;
+
+    if (makePrimary || !this.primaryRoomNameHash) {
+      this.primaryRoomNameHash = roomNameHash;
+      this.initKBucket();
+    }
 
     // create room locally
     this.setRoom(roomNameHash, true, {
@@ -76,103 +105,253 @@ class UnamedNetwork extends EventEmitter {
 
     const findResPacket = await this.findRoom(roomNameHash, roomName);
 
-    this.peers.forEach(peer => {
-      this.ping(peer); // not awaiting for pong for speed
+    // announce that we have a new room
+    this.peers.forEach((_, peerId) => {
+      this.ping(peerId); // not awaiting for pong for speed
     });
 
-    if (!findResPacket) return;
+    if (!findResPacket) return false;
 
-    // TODO: connect to peers near targetRoom
+    const routeToRoom = findResPacket.route.reverse();
+
+    logger.join(`join: find room got response, route: [${findResPacket.route.join(' - ')}]`);
 
     if (!findResPacket.found) {
-      return this.logIfStarted(`room '${roomName}' not found, this node is the only member. (might need to retry a couple of times)`);
+      this.logIfStarted('join', `room '${roomName}' not found, this node is the only member (might need to retry a couple of times), start connecting to nearest node...`);
+      const nearestNode = last(routeToRoom);
+      await this.connectPeerOnNetwork(routeToRoom);
+      logger.join(`nearest node '${nearestNode}' connected!`);
+      return false;
     }
+    logger.join(`room '${roomName}' found`);
 
-    console.log('join: room found!', { findResPacket });
+    const firstRoomMember = last(routeToRoom);
+    await this.connectPeerOnNetwork(routeToRoom);
+
+    logger.join(`room member '${firstRoomMember}' connected!`);
+
+    return true;
 
     // TODO: room is found, then:
-    // * [ ] connect to the replied peer
+    // * [x] connect to the replied peer
     // * [ ] send join request to the peer
     // * [ ] using replied join packet to connect to all other peers in the room
   }
 
   // =================
 
-  kBucketArbiter(incumbent, candidate) {
-    console.warn('kBucketArbiter: should not be called, returning incumbent', { incumbent, candidate })
-    return incumbent;
+  initKBucket() {
+    const localNodeId = this.primaryRoomNameHash ? BufferUtils.fromString(this.primaryRoomNameHash, 'base64') : null;
+    this.kBucket = new KBucket({
+      ...(this.nodeType === 'serviceNode' ? K_BUCKET_OPTIONS_SERVICE_NODE : K_BUCKET_OPTIONS_CLIENT_NODE),
+      localNodeId,
+    });
+    this.kBucket.on('ping', (oldContacts, newContact) => this.kBucketPing(oldContacts, newContact))
+
+    this.rooms.forEach(room => {
+      this.addRoomToKBucket(room);
+    });
+  }
+
+  kBucketPing(oldContacts, newContact) {
+    // Emitted every time a contact is added that would exceed the capacity of a don't split k-bucket it belongs to.
+    logger.kBucket('kBucketPing:', oldContacts, newContact);
+    // TODO: disconnect oldContacts
+  }
+
+  getConnectedPeer(peerId) {
+    const peer = this.peers.get(peerId);
+    if (peer && peer.state === 'connected') return peer;
+    return null;
   }
 
   setPeer(peerId, payload) {
-    const { nodeType, roomNameHashes } = payload;
-
+    // payload: { addrs?: [], roomNameHashes?: [], rtc?: Rtc, setConnected?: boolean }
     let peer = this.peers.get(peerId);
-    let isNew = !peer;
-    if (isNew) {
+    if (!peer) {
       peer = {
         peerId,
-        nodeType,
-        roomNameHashes: new Set(),
+        state: 'pending',
+        addrs: [],
+        nodeType: 'clientNode',
+        roomNameHashes: [],
+        connectedResolves: [],
       };
       this.peers.set(peerId, peer);
     }
 
-    roomNameHashes.forEach(roomNameHash => {
-      this.setRoom(roomNameHash, false, {
-        peers: [peerId],
+    if (payload.addrs) {
+      peer.addrs = payload.addrs;
+      peer.nodeType = peer.addrs.length > 0 ? 'serviceNode' : 'clientNode';
+    }
+    if (payload.roomNameHashes) {
+      peer.roomNameHashes = payload.roomNameHashes;
+      peer.roomNameHashes.forEach(roomNameHash => {
+        this.setRoom(roomNameHash, false, {
+          peers: [peerId],
+        });
       });
-      peer.roomNameHashes.add(roomNameHash);
-    });
+    }
+    if (payload.rtc) {
+      peer.rtc = payload.rtc;
+    }
+    if (payload.setConnected) {
+      const oriPending = peer.state === 'pending';
+      peer.state = 'connected';
+
+      if (oriPending) {
+        this.emit('new-peer', peer);
+      }
+    }
+    if (peer.state === 'connected') {
+      peer.connectedResolves.forEach(r => r(peer));
+      peer.connectedResolves = [];
+    }
+
     return peer;
   }
 
+  getRoomJoined(roomNameHash) {
+    const room = this.rooms.get(roomNameHash);
+    return room && room.joined;
+  }
+
+  addRoomToKBucket(room) {
+    // TODO: what if the room is our primary room?
+    if (room.peers.size > 0) {
+      this.kBucket.add({
+        id: BufferUtils.fromString(room.roomNameHash, 'base64'),
+        roomNameHash: room.roomNameHash,
+        vectorClock: Date.now(),
+      });
+    }
+  }
+
   setRoom(roomNameHash, toJoin, payload) {
-    // to remove Room or peer in room, implement another function
+    // payload: { name?: roomName, peers?: PeerId[] }
+    // to remove room or peer in room, implement another function
 
-    const roomNameHashBuffer = BufferUtils.fromString(roomNameHash, 'base64');
-    const joinedRoom = this.rooms.get(roomNameHash);
-    const joinedAlready = !!joinedRoom;
-    const kBucketRoom = this.kBucket.get(roomNameHashBuffer);
-    const inKBucket = !!kBucketRoom;
-
-    const room = joinedRoom || kBucketRoom || {
-      // new room in local memory:
-      id: roomNameHashBuffer,
-      roomNameHash,
-      peers: new Set(),
+    let room = this.rooms.get(roomNameHash);
+    if (!room) {
+      room = {
+        roomNameHash,
+        joined: false,
+        peers: new Set(),
+      }
+      this.rooms.set(roomNameHash, room);
     }
 
-    // updating
-    room.vectorClock = Date.now();
-    room.name = payload.name;
-
     const newPeers = [];
-    (payload.peers || []).forEach(peerId => { // payload.peers can be js array or Set
+
+    // updating
+    room.name = room.name || payload.name;
+    (payload.peers || []).forEach(peerId => {
       if (!room.peers.has(peerId)) {
         room.peers.add(peerId);
         newPeers.push(peerId);
       }
     });
 
-    if (!joinedAlready && toJoin) {
-      this.rooms.set(roomNameHash, room);
-    }
-    if (!inKBucket && room.peers.size > 0) {
-      this.kBucket.add(room);
-    }
+    this.addRoomToKBucket(room);
 
-    if (toJoin || joinedAlready) {
-      newPeers.forEach(peerId => {
-        this.emit('new-peer', { roomName: room.name, peerId });
-      });
+    if (toJoin) {
+      if (!room.name) throw new Error('setRoom: joined room but no room.name', { room });
+      room.joined = true;
     }
+  }
+
+  async connectAddr(addrs) {
+    const addr = sample(addrs);
+    const peerId = last(addr.split('/'));
+
+    logger.addrConn(`connectAddr: to '${peerId}' via '${addr}'`);
+
+    await this.ipfs.swarm.connect(addr);
+
+    const pubsubTopic = pubsubLinkTopic(peerId);
+    await this.ipfs.pubsub.subscribe(pubsubTopic); // TODO: if this prototype can work, we should use link/rpc from libp2p
+    let peers = [];
+    do {
+      logger.addrConn(`connectAddr: wait for pubsub '${pubsubTopic}' peer (as link) to show up... [${peers.join(', ')}]`);
+      peers = await this.ipfs.pubsub.peers(pubsubTopic);
+      await timeoutPromise(200);
+    } while(peers.indexOf(peerId) === -1)
+
+    this.setPeer(peerId, {
+      addrs,
+    });
+    await this.ping(peerId);
+  }
+
+  async connectRtc(route, ephemeral, myEphemeralKey, peerEphemeralKey, initiator) {
+    const sharedKey = await ephemeral.genSharedKey(BufferUtils.fromString(peerEphemeralKey, 'base64'));
+    const keyStretched = await crypto.keys.keyStretcher(EPHEMERAL_STRETCHER_CIPHER_TYPE, EPHEMERAL_STRETCHER_HASH_TYPE, sharedKey);
+    const cipherK1 = await crypto.aes.create(keyStretched.k1.cipherKey, keyStretched.k1.iv);
+    const cipherK2 = await crypto.aes.create(keyStretched.k2.cipherKey, keyStretched.k2.iv);
+
+    const encrypter = initiator ? cipherK1 : cipherK2;
+    const decrypter = initiator ? cipherK2 : cipherK1;
+
+    const peerId = last(route);
+    const simplePeer = new SimplePeer({ initiator });
+    const peer = this.setPeer(peerId, {
+      rtc: {
+        simplePeer,
+        ephemeral, encrypter, decrypter,
+      },
+    });
+
+    logger.webrtcConn('connectRtc: encrypter/decrypter and SimplePeer (webRtc) created', { initiator, peer, encrypter, decrypter });
+
+    simplePeer.on('signal', async signal => {
+      logger.webrtcConn('connectRtc: signal for the other peer', { signal });
+      const encryptedSignal = BufferUtils.toString(
+        await encrypter.encrypt(
+          BufferUtils.fromString(
+            JSON.stringify(signal)
+          )
+        ),
+        'base64'
+      );
+
+      const connectSignalPacket = this.createNetworkPacket(route, {
+        type: 'connectSignal',
+        ephemeralKey: myEphemeralKey,
+        encryptedSignal,
+      });
+      this.sendNetworkPacket(connectSignalPacket);
+    });
+    simplePeer.on('connect', () => {
+      logger.webrtcConn(`connectRtc: rtc between '${peerId}' is connected`);
+
+      if (initiator) this.ping(peerId);
+    });
+    simplePeer.on('data', data => {
+      this.handleRtcPacket(peer, data);
+    });
+
+    return peer.rtc;
+  }
+
+  async rtcReceivedSignal(peerId, encryptedSignal) {
+    const peer = this.peers.get(peerId);
+    if (!peer || !peer.rtc) return;
+
+    const signal = JSON.parse(
+      BufferUtils.toString(
+        await peer.rtc.decrypter.decrypt(
+          BufferUtils.fromString(encryptedSignal, 'base64')
+        )
+      )
+    );
+    logger.webrtcConn('rtcReceivedSignal:', { peerId, signal });
+    peer.rtc.simplePeer.signal(signal);
   }
 
   handleSelfSubPacket(data) {
     if (data.from === this.idInfo.id) return;
 
     const dataStr = BufferUtils.toString(data.data);
-    console.log(`handleSelfSubPacket: from ${data.from}: ${dataStr}`)
 
     let packet;
     try {
@@ -184,10 +363,25 @@ class UnamedNetwork extends EventEmitter {
     this.handlePacket(data.from, packet);
   }
 
+  handleRtcPacket(peer, data) {
+    const dataStr = BufferUtils.toString(data);
+
+    let packet;
+    try {
+      packet = JSON.parse(dataStr);
+    } catch (error) {
+      return console.warn(`handleRtcPacket: not valid json from ${peer.peerId}: ${dataStr}`, error);
+    }
+
+    this.handlePacket(peer.peerId, packet);
+  }
+
   handlePacket(from, packet) {
     if (packet.protocol !== PROTOCOL) {
       return console.warn(`handlePacket: unexpected protocol '${packet.protocol}', currently using '${PROTOCOL}'`);
     }
+    logger.packet(`handlePacket: receive ${briefPacket(packet, `from ${from}`)}`);
+    logger.packetContent(packet);
 
     switch(packet.type) {
       case 'ping':
@@ -197,13 +391,17 @@ class UnamedNetwork extends EventEmitter {
       case 'find':
         return this.handleFindPacket(from, packet);
       case 'findRes':
-        return this.handleInternetPacket(from, packet) || this.handleResponsePacket(from, packet);
-      case 'signal':
-        break;
+        return this.handleNetworkPacket(from, packet) || this.handleResponsePacket(from, packet);
+      case 'connect':
+        return this.handleNetworkPacket(from, packet) || this.handleConnectPacket(from, packet);
+      case 'connectRes':
+        return this.handleNetworkPacket(from, packet) || this.handleResponsePacket(from, packet);
+      case 'connectSignal':
+        return this.handleNetworkPacket(from, packet) || this.handleConnectSignalPacket(from, packet);
     }
   }
 
-  handleInternetPacket(_from, packet) {
+  handleNetworkPacket(_from, packet) {
     if (
       packet.route.length === (packet.hop + 1) &&
       packet.route[packet.hop] === this.idInfo.id
@@ -211,25 +409,26 @@ class UnamedNetwork extends EventEmitter {
       return false;
     }
 
-    this.sendInternetPacket(packet);
+    this.sendNetworkPacket(packet);
     return true;
   }
 
   handlePingPacket(from, packet) {
-    this.setPeer(from, packet);
+    const peer = this.setPeer(from, {
+      ...packet, setConnected: true,
+    });
     const pongPacket = this.createPacket({
       type: 'pong',
-      nodeType: this.nodeType,
-      roomNameHashes: [...this.rooms.keys()],
+      ...this.pingPongPayload(),
     });
     this.respond(packet, pongPacket);
-    this.sendPacket(this.peers.get(from), pongPacket);
+    this.sendPacket(peer, pongPacket);
     return true;
   }
 
   handleFindPacket(_from, packet) {
-    if (this.rooms.has(packet.targetHash)) {
-      const foundPacket = this.createInternetPacket(
+    if (this.getRoomJoined(packet.targetHash)) {
+      const foundPacket = this.createNetworkPacket(
         [...packet.fromPath, this.idInfo.id].reverse(),
         {
           type: 'findRes',
@@ -239,11 +438,34 @@ class UnamedNetwork extends EventEmitter {
       );
 
       this.respond(packet, foundPacket);
-      this.sendInternetPacket(foundPacket);
+      this.sendNetworkPacket(foundPacket);
       return true;
     }
 
     this.routeAndSendFindPacket(packet);
+    return true;
+  }
+
+  handleConnectPacket(_from, packet) {
+    const peerId = packet.route[0];
+    if (this.peers.has(peerId)) { // already connected or pending, reject
+      const connectResPacket = this.createNetworkPacket(packet.route.reverse(), {
+        type: 'connectRes',
+        accepted: false,
+      });
+      this.respond(packet, connectResPacket);
+      this.sendNetworkPacket(connectResPacket);
+      return true;
+    }
+    this.setPeer(peerId, {});
+
+    // otherwise accept connection directly for now
+    this.acceptConnectionFromNetwork(packet);
+    return true;
+  }
+
+  handleConnectSignalPacket(_from, packet) {
+    this.rtcReceivedSignal(packet.route[0], packet.encryptedSignal);
     return true;
   }
 
@@ -255,7 +477,7 @@ class UnamedNetwork extends EventEmitter {
     }
   }
 
-  createInternetPacket(route, content) {
+  createNetworkPacket(route, content) {
     return {
       ...this.createPacket(content),
       route,
@@ -263,57 +485,103 @@ class UnamedNetwork extends EventEmitter {
     }
   }
 
+  request(reqPacket, timeout = 5000) {
+    reqPacket.reqId = randomId();
+    const timer = setTimeout(() => {
+      this.rejectRequest(reqPacket,  new Error(`request: timeout for ${reqPacket.reqId}`, { reqPacket }));
+    }, timeout);
+
+    const promise = new Promise((resolve, reject) => {
+      this.requestResolveRejects.set(reqPacket.reqId, [resolve, reject, reqPacket]);
+    }).finally(() => {
+      clearTimeout(timer);
+    });
+
+    return promise;
+  }
+  respond(reqPacket, resPacket) {
+    resPacket.reqId = reqPacket.reqId;
+  }
+  popRequest(packet) {
+    const request = this.requestResolveRejects.get(packet.reqId);
+    if (request) {
+      this.requestResolveRejects.delete(packet.reqId);
+      return request;
+    }
+    return []; // allow array destruction
+  }
+  rejectRequest(reqPacket, reason) {
+    const [_, reject] = this.popRequest(reqPacket);
+    if (reject) reject(reason);
+  }
+  handleResponsePacket(_from, resPacket) {
+    const [resolve] = this.popRequest(resPacket);
+    if (!resolve) return false;
+    resolve(resPacket);
+    return true;
+  }
+
   async sendPacket(peer, packet) {
+    logger.packet(`sendPacket: send ${briefPacket(packet, `to ${peer.peerId}`)}`);
+    logger.packetContent(packet);
+
     if ([this.nodeType, peer.nodeType].indexOf('serviceNode') !== -1) {
-      await this.ipfs.pubsub.publish(`${PUBSUB_TOPIC_PREFIX}/${peer.peerId}`, JSON.stringify(packet));
-    } else if (peer.rtcPeer) {
-      // WIP
+      await this.ipfs.pubsub.publish(pubsubLinkTopic(peer.peerId), JSON.stringify(packet));
+    } else if (peer.rtc) {
+      peer.rtc.simplePeer.send(JSON.stringify(packet));
     } else {
       throw new Error('sendPacket: peer is not serviceNode nor rtcPeer');
     }
   }
 
-  async sendInternetPacket(packet) {
+  async sendNetworkPacket(packet) {
     if (packet.route[packet.hop] !== this.idInfo.id) {
-      console.warn('sendInternetPacket: current hop pointing peerId is not self', { packet });
+      console.warn('sendNetworkPacket: current hop pointing peerId is not self', { packet });
       return;
     }
 
     const nextHop = packet.hop + 1;
     const peerId = packet.route[nextHop];
-    const peer = this.peers.get(peerId);
+    const peer = this.getConnectedPeer(peerId);
 
     if (!peer) {
-      console.warn('sendInternetPacket: peer not found, sending InternetNoPeerPacket', { packet });
-      const noPeerPacket = this.createInternetPacket(
+      console.warn('sendNetworkPacket: peer not found, sending NetworkNoPeerPacket', { packet });
+      const noPeerPacket = this.createNetworkPacket(
         packet.route.slice(0, packet.hop).reverse(),
         {
           type: 'noPeer',
           oriPacketId: packet.packetId,
         }
       );
-      this.sendInternetPacket(noPeerPacket);
+      this.sendNetworkPacket(noPeerPacket);
       return;
     }
 
     packet.hop = nextHop;
-    this.sendPacket(peer, packet);
+    await this.sendPacket(peer, packet);
   }
 
-  async ping(peer) {
+  pingPongPayload() {
+    return {
+      addrs: this.addrs,
+      roomNameHashes: [...this.rooms.keys()].filter(roomNameHash => this.getRoomJoined(roomNameHash)),
+    }
+  }
+  async ping(peerId) {
+    const peer = this.peers.get(peerId);
     const packet = this.createPacket({
       type: 'ping',
-      nodeType: this.nodeType,
-      roomNameHashes: [...this.rooms.keys()],
+      ...this.pingPongPayload(),
     });
-    const pongRequest = this.request(packet);
+    const pingRequest = this.request(packet);
     this.sendPacket(peer, packet);
-    const pongPacket = await pongRequest;
-    this.setPeer(peer.peerId, pongPacket);
+    const pongPacket = await pingRequest;
+    this.setPeer(peer.peerId, {
+      ...pongPacket, setConnected: true,
+    });
   }
 
   async findRoom(roomNameHash, roomName) {
-    //const packet = this.createFindPacket(roomNameHash, roomName);
     const packet =  this.createPacket({
       type: 'find',
       targetHash: roomNameHash,
@@ -323,37 +591,123 @@ class UnamedNetwork extends EventEmitter {
       roomName, // for dbg
     });
 
-    try {
-      const findRequest = this.request(packet);
-      this.routeAndSendFindPacket(packet);
-      return await findRequest;
-    } catch (error) {
-      this.warnIfStarted('join: find request failed: ', error);
-      return null;
-    }
+    const findRequest = this.request(packet);
+    this.routeAndSendFindPacket(packet);
+    return await findRequest;
   }
 
-  createFindPacket(roomNameHash, roomName) {
-    return this.createPacket({
-      type: 'find',
-      targetHash: roomNameHash,
-      fromPath: [],
-      lastDistance: Infinity, // Infinity cannot be encode in JSON, but it should and will be updated in routeAndSendFindPacket
-
-      roomName, // for dbg
+  async connectPeerOnNetwork(route) {
+    const peerId = last(route);
+    const existingPeer = this.peers.get(peerId);
+    if (existingPeer) {
+      if (existingPeer.state === 'pending') {
+        return new Promise(resolve => {
+          existingPeer.connectedResolves.push(resolve);
+        });
+      }
+      return true;
+    }
+    const peer = this.setPeer(peerId, {});
+    const promise = new Promise(resolve => {
+      peer.connectedResolves.push(resolve);
     });
+
+    logger.conn(`connectPeerOnNetwork: to ${last(route)}`);
+
+    const ephemeral = await crypto.keys.generateEphemeralKeyPair(EPHEMERAL_ALG);
+    const ephemeralKey = BufferUtils.toString(ephemeral.key, 'base64');
+    const connectPacket = this.createNetworkPacket(route, {
+      type: 'connect',
+      ephemeralKey,
+      addrs: this.addrs,
+    });
+
+    const connectRequest = this.request(connectPacket);
+    this.sendNetworkPacket(connectPacket);
+    const connectResPacket = await connectRequest;
+
+    if (!(connectResPacket.accepted && connectResPacket.method)) {
+      throw new Error(`connectPeerOnNetwork: peer '${peerId}' rejected`, { connectResPacket });
+    }
+
+    logger.conn(`connectPeerOnNetwork: connect request accepted by peer, method: ${connectResPacket.method}`);
+
+    switch (connectResPacket.method) {
+      case 'myAddr': // means peer's addr
+        this.connectAddr(connectResPacket.addrs);
+      case 'yourAddr': // means this node's addr
+        break;
+        //if (this.getConnectedPeer(peerId)) return;
+        //return await eventPromise(this, 'new-peer', peer => peer.peerId === peerId);
+      case 'webrtc':
+        this.connectRtc(route, ephemeral, ephemeralKey, connectResPacket.ephemeralKey, true);
+        //if (this.getConnectedPeer(peerId)) return;
+        //return await eventPromise(this, 'new-peer', peer => peer.peerId === peerId);
+    }
+
+    return promise;
+  }
+
+  async acceptConnectionFromNetwork(connectPacket) {
+    const routeToPeer = connectPacket.route.reverse();
+    logger.conn(`acceptConnectionFromNetwork: from ${last(routeToPeer)}`);
+
+    if (this.nodeType === 'serviceNode') {
+      logger.conn(`acceptConnectionFromNetwork: provide method: myAddr (${this.addrs.join(',')})`);
+      const connectResPacket = this.createNetworkPacket(routeToPeer, {
+        type: 'connectRes',
+        accepted: true,
+        method: 'myAddr',
+        addrs: this.addrs,
+      });
+
+      this.respond(connectPacket, connectResPacket);
+      return this.sendNetworkPacket(connectResPacket);
+    }
+
+    if (connectPacket.addrs.length > 0) {
+      logger.conn(`acceptConnectionFromNetwork: provide method: yourAddr (peer's) (${connectPacket.addrs.join(', ')})`);
+      const connectResPacket = this.createNetworkPacket(routeToPeer, {
+        type: 'connectRes',
+        accepted: true,
+        method: 'yourAddr',
+      });
+
+      this.respond(connectPacket, connectResPacket);
+      await this.sendNetworkPacket(connectResPacket);
+
+      return this.connectAddr(connectPacket.addrs);
+    }
+
+    logger.conn(`acceptConnectionFromNetwork: provide method: webrtc, generating ephemeral keys...`);
+    const ephemeral = await crypto.keys.generateEphemeralKeyPair(EPHEMERAL_ALG);
+    const ephemeralKey = BufferUtils.toString(ephemeral.key, 'base64');
+    await this.connectRtc(routeToPeer, ephemeral, ephemeralKey, connectPacket.ephemeralKey, false);
+    // initiator will start sending signal immediately,
+    //   at this moment the other peer does not know we are going to use webrtc (because connectRes has not been sent)
+    //   to prevent connectRes packet arrive after connectSignal, we let the other peer be the initiator.
+
+    const connectResPacket = this.createNetworkPacket(routeToPeer, {
+      type: 'connectRes',
+      accepted: true,
+      method: 'webrtc',
+      ephemeralKey,
+    });
+    this.respond(connectPacket, connectResPacket);
+    this.sendNetworkPacket(connectResPacket);
   }
 
   routeAndSendFindPacket(packet) {
     const targetHashBuffer = BufferUtils.fromString(packet.targetHash, 'base64');
 
-    const room = this.kBucket.closest(targetHashBuffer, 1)[0];
+    const contact = this.kBucket.closest(targetHashBuffer, 1)[0] || {};
+    const room = this.rooms.get(contact.roomNameHash);
 
     if (!room) {
       return this.routeFindPacketFailed(packet, 'routeAndSendFindPacket: no room in kBucket');
     }
 
-    const distance = KBucket.distance(room.id, targetHashBuffer);
+    const distance = KBucket.distance(contact.id, targetHashBuffer);
     if (distance > packet.lastDistance) {
       return this.routeFindPacketFailed(packet, 'routeAndSendFindPacket: cannot find smaller distance between target');
     }
@@ -365,23 +719,23 @@ class UnamedNetwork extends EventEmitter {
     if (!peerId) {
       return this.routeFindPacketFailed(packet, 'routeAndSendFindPacket: no peer in room available');
     }
-    const peer = this.peers.get(peerId);
+    const peer = this.getConnectedPeer(peerId);
 
     packet.fromPath.push(this.idInfo.id);
     packet.lastDistance = distance;
 
-    this.sendPacket(peer, packet)
+    return this.sendPacket(peer, packet)
   }
 
   routeFindPacketFailed(packet, reason) {
-    this.warnIfStarted(reason);
+    this.logIfStarted('routeFind', `routeFindPacketFailed: ${reason}`);
 
     if (packet.fromPath.length <= 0) {
       // make self requested find to stop
-      return this.cancelRequest(packet, new Error(`canceled: not even be able to send out, which means this node is the only node in the known network. (originally: ${reason})`));
+      return this.rejectRequest(packet, new Error(`canceled: not even be able to send out, which means this node is the only node in the known network. (originally: ${reason})`));
     }
 
-    const notFoundPacket = this.createInternetPacket(
+    const notFoundPacket = this.createNetworkPacket(
       [...packet.fromPath, this.idInfo.id].reverse(),
       {
         type: 'findRes',
@@ -390,145 +744,74 @@ class UnamedNetwork extends EventEmitter {
     );
 
     this.respond(packet, notFoundPacket);
-    this.sendInternetPacket(notFoundPacket);
+    this.sendNetworkPacket(notFoundPacket);
   }
 
-  async connectWebrtc(peerId) {
-    return new Promise(resolve => {
-      const peer = new SimplePeer({ initiator: true });
-      peer.on('signal', data => {
-        this.sendPacket({
-          type: 'signal',
-          to: peerId,
-          data,
-        });
-      });
-      peer.on('connect', () => {
-        console.log(`connecting to ${peerId} other successfully`)
-        resolve(peer);
-
-        setInterval(() => {
-          const rnd = `${(new Date()).toISOString()}: ${Math.random() * 10000}`;
-          peer.send(rnd);
-        }, 2000);
-      });
-      peer.on('data', data => {
-        console.log('got a message from peer being connected: ' + data)
-      });
-      console.log('peer inited', peer);
-      this.peers[peerId] = peer;
-    });
-  }
-
-  async connectAddr(multiaddr) {
-    await this.ipfs.swarm.connect(multiaddr);
-    const peerId = last(multiaddr.split('/'));
-    const peer = {
-      peerId,
-      nodeType: 'serviceNode',
-    }
-
-    await this.ping(peer);
-  }
-
-  request(packet, timeout = 5000) {
-    packet.reqId = randomId();
-    const promise = new Promise((resolve, reject) => {
-      this.requestResolveRejects.set(packet.reqId, [resolve, reject]);
-    });
-
-    setTimeout(() => {
-      const request = this.requestResolveRejects.get(packet.reqId);
-      if (request) {
-        const [_, reject] = request;
-        reject(
-          new Error(`request: timeout for ${packet.reqId}`, { packet })
-        );
-      }
-    }, timeout);
-
-    return promise;
-  }
-  respond(reqPacket, packet) {
-    packet.reqId = reqPacket.reqId;
-  }
-  popRequest(packet) {
-    const request = this.requestResolveRejects.get(packet.reqId);
-    if (request) {
-      this.requestResolveRejects.delete(packet.reqId);
-      return request;
-    }
-    return []; // allow array destruction
-  }
-  cancelRequest(reqPacket, reason) {
-    const [_, reject] = this.popRequest(reqPacket);
-    if (reject) reject(reason);
-  }
-  handleResponsePacket(_from, resPacket) {
-    const [resolve] = this.popRequest(resPacket);
-    if (!resolve) return false;
-    resolve(resPacket);
-    return true;
-  }
-
-  logIfStarted(...message) {
+  logIfStarted(ns, ...message) {
     if (this.started) {
-      console.log(...message);
-    }
-  }
-  warnIfStarted(...message) {
-    if (this.started) {
-      console.warn(...message);
+      logger[ns](...message);
     }
   }
 
   // TODO: remove:
-  testSomeStuff() {
+  async testSomeStuff() {
     // this doesn't work on repl, but work in code?
-    console.log('BufferUtils.toString', BufferUtils.toString(new Uint8Array([0]), 'base64'));
+    // console.log('BufferUtils.toString', BufferUtils.toString(new Uint8Array([0]), 'base64'));
   }
+  async testEphemeral() {
+    let pub1, pub2;
 
-  handlePacketOld(from, json) {
-    let peer = this.peers[from];
-    switch(json.type) {
-      case 'hello':
-        this.kBucket.add({
-          id: peerIdBuffer(from),
-          peerId: from,
-          type: json.nodeType,
-        });
-        break;
-      case 'signal':
-        if (!peer) {
-          peer = new SimplePeer();
-          peer.on('signal', data => {
-            this.sendMessage({
-              type: 'signal',
-              to: from,
-              data,
-            });
-          });
-          peer.on('connect', () => {
-            console.log('being connected from the other successfully')
-            setInterval(() => {
-              const rnd = `${(new Date()).toISOString()}: ${Math.random() * 10000}`;
-              peer.send(rnd);
-            }, 2000);
-          });
-          peer.on('data', data => {
-            console.log('got a message from peer connecting: ' + data)
-          });
-          this.peers[from] = peer;
-        }
-        peer.signal(json.data);
-        break;
-    }
+    // peer 1
+    const ephemeral1 = await crypto.keys.generateEphemeralKeyPair('P-256');
+    pub1 = BufferUtils.toString(ephemeral1.key, 'base64');
+
+    // send pub1 to peer 2
+    const ephemeral2 = await crypto.keys.generateEphemeralKeyPair('P-256');
+    pub2 = BufferUtils.toString(ephemeral2.key, 'base64');
+    const sharedKey2 = await ephemeral2.genSharedKey(BufferUtils.fromString(pub1, 'base64'));
+
+    // send pub2 to peer 1
+    const sharedKey1 = await ephemeral1.genSharedKey(BufferUtils.fromString(pub2, 'base64'));
+
+    // peer 1
+    const keyStretched1 = await crypto.keys.keyStretcher('AES-128', 'SHA1', sharedKey1);
+    const cipher1To = await crypto.aes.create(keyStretched1.k1.cipherKey, keyStretched1.k1.iv);
+    const cipher1Back = await crypto.aes.create(keyStretched1.k2.cipherKey, keyStretched1.k2.iv);
+
+    const messageA = 'Hello, world!';
+    const encryptedA = BufferUtils.toString(await cipher1To.encrypt(BufferUtils.fromString(messageA)), 'base64');
+    
+    // send encryptedA to peer 2
+    const keyStretched2 = await crypto.keys.keyStretcher('AES-128', 'SHA1', sharedKey2);
+    const cipher2To = await crypto.aes.create(keyStretched2.k2.cipherKey, keyStretched2.k2.iv);
+    const cipher2Back = await crypto.aes.create(keyStretched2.k1.cipherKey, keyStretched2.k1.iv);
+
+    const decryptedA = BufferUtils.toString(await cipher2Back.decrypt(
+      BufferUtils.fromString(encryptedA, 'base64')
+    ));
+
+    const messageB = 'It worked!';
+    const encryptedB = BufferUtils.toString(await cipher2To.encrypt(BufferUtils.fromString(messageB)), 'base64');
+
+    // send encryptedB to peer 1
+    const decryptedB = BufferUtils.toString(await cipher1Back.decrypt(
+      BufferUtils.fromString(encryptedB, 'base64')
+    ))
+
+    const $ = (typeof window === 'undefined' ? global : window);
+    $.testSomeStuffRes = {
+      pub1, pub2,
+      ephemeral1, ephemeral2,
+      sharedKey1, sharedKey2,
+      keyStretched1, keyStretched2,
+
+      messageA, encryptedA, decryptedA,
+      messageB, encryptedB, decryptedB,
+    };
+    console.log($.testSomeStuffRes);
   }
 }
 
-function peerIdBuffer(peerIdStr) {
-  return PeerId.parse(peerIdStr).toBytes().slice(6)
-}
 function last(arr) {
   return arr[arr.length - 1];
 }
@@ -548,6 +831,34 @@ async function hash(buf) {
 }
 function randomId() {
   return BufferUtils.toString(crypto.randomBytes(12), 'base64');
+}
+function pubsubLinkTopic(peerId) {
+  return `${PUBSUB_TOPIC_PREFIX}${peerId}`
+}
+function timeoutPromise(timeout) {
+  return new Promise(resolve => {
+    setTimeout(resolve, timeout);
+  });
+}
+function eventPromise(eventEmitter, eventName, eventFilterFn = () => true) {
+  let rejectTmp;
+  const promise = new Promise((resolve, reject) => {
+    rejectTmp = reject;
+    const listener = (...eventPayload) => {
+      if (eventFilterFn(...eventPayload)) {
+        eventEmitter.removeListener(eventName, listener);
+        resolve(...eventPayload);
+      }
+    };
+    eventEmitter.on(eventName, listener);
+  });
+  promise.reject = rejectTmp;
+  return promise;
+}
+function briefPacket(packet, direction) {
+  return `'${packet.type}' ${direction}` +
+    (packet.reqId ? ` (reqId: ${packet.reqId})` : '') +
+    (packet.route ? ` [${packet.route[0]} -> ${last(packet.route)}]` : '');
 }
 
 module.exports = UnamedNetwork;

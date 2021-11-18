@@ -2,10 +2,16 @@ const IPFS = require('ipfs-core');
 const WS = require('libp2p-websockets');
 const filters = require('libp2p-websockets/src/filters');
 const transportKey = WS.prototype[Symbol.toStringTag];
+const debug = require('debug');
 
 const UnamedNetwork = require('./unamed-network');
 
 const { DEV_KNOWN_SERVICE_ADDRS } = require('./dev-env');
+
+debug.enable([
+  'unamedNetwork:*',
+  '-unamedNetwork:start',
+].join(',')); // for development
 
 async function main() {
   const ipfs = await IPFS.create({

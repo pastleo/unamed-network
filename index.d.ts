@@ -1,33 +1,61 @@
-import { EventEmitter } from 'events';
+import { EventEmitter } from 'tsee';
 import { IPFS } from 'ipfs-core';
 import KBucket from 'k-bucket';
+import crypto from 'libp2p-crypto';
 
 declare module 'unamed-network' {
   type RoomNameHash = string;
   type RoomNameHashBuffer = Uint8Array;
   type PeerId = string;
+  type MultiAddr = string;
+  type ReqId = string;
   type NodeType = 'serviceNode' | 'clientNode';
 
   interface Room {
-    id: RoomNameHashBuffer;
     roomNameHash: RoomNameHash;
-    vectorClock: number; // for KBucket.Contact
+    joined: boolean;
     name?: string; // not hashed, only room member knows
     peers: Set<PeerId>;
   }
   interface Peer {
     peerId: PeerId;
+    state: 'pending' | 'connected';
+    addrs: MultiAddr[];
     nodeType: NodeType;
-    roomNameHashes: Set<RoomNameHash>;
-    rtcPeer?: SimplePeer;
+    roomNameHashes: RoomNameHash[];
+    connectedResolves: ((peer: Peer) => void)[];
+    rtc?: Rtc;
+  }
+  interface KBucketContact {
+    id: RoomNameHashBuffer;
+    roomNameHash: RoomNameHash;
+    vectorClock: number;
   }
 
-  export default class UnamedNetwork extends EventEmitter {
+  type UnamedNetworkEvents = {
+    'new-peer': (peer: Peer) => void;
+  }
+
+  type Ephemeral = Unpromise<ReturnType<typeof crypto.keys.generateEphemeralKeyPair>>;
+  type Encrypter = Unpromise<ReturnType<typeof crypto.aes.create>>;
+  type Decrypter = Unpromise<ReturnType<typeof crypto.aes.create>>;
+  interface Rtc {
+    simplePeer: SimpleRtcPeer;
+    ephemeral: Ephemeral;
+    encrypter: Encrypter;
+    decrypter: Decrypter;
+  }
+
+  export default class UnamedNetwork extends EventEmitter<UnamedNetworkEvents> {
     nodeType: NodeType;
     ipfs: IPFS;
-    kBucket: KBucket<Room>; // known rooms, rooms without other peers should not be added this bucket
-    rooms: Map<RoomNameHash, Room>; // joined
+    rooms: Map<RoomNameHash, Room>;
+    primaryRoomNameHash: RoomNameHash | null; // for kBucket's localNodeId, which determine this node's location in Kademlia DHT network
     peers: Map<PeerId, Peer>; // connected
+    kBucket: KBucket<KBucketContact>; // known rooms, but rooms without other peers should not be added
+
+    private requestResolveRejects: Map<ReqId, [(payload: any) => void, (error: any) => void]>;
+    private started: boolean;
   }
 
   // Packets
@@ -39,20 +67,20 @@ declare module 'unamed-network' {
     packetId: string;
   }
   interface Request { // abstract
-    reqId: string;
+    reqId: ReqId;
   }
   interface Response { // abstract
-    reqId: string;
+    reqId: ReqId;
   }
 
   interface PingPacket extends Packet, Request {
     type: 'ping';
-    nodeType: NodeType;
+    addrs: MultiAddr[];
     roomNameHashes: RoomNameHash[];
   }
   interface PongPacket extends Packet, Response {
     type: 'pong';
-    nodeType: NodeType;
+    addrs: MultiAddr[];
     roomNameHashes: RoomNameHash[];
   }
 
@@ -65,49 +93,59 @@ declare module 'unamed-network' {
     roomName: string; // development
   }
 
-  interface InternetPacket extends Packet { // abstract
+  interface NetworkPacket extends Packet { // abstract
     route: PeerId[]; // include sender
     hop: number; // index in toPath
   }
 
-  interface InternetNoPeerPacket extends InternetPacket {
+  interface NetworkNoPeerPacket extends NetworkPacket {
     type: 'noPeer';
     oriPacketId: string;
   }
 
-  interface FindResPacket extends InternetPacket, Response {
+  interface FindResPacket extends NetworkPacket, Response {
     type: 'findRes';
     found: boolean;
 
     roomName: string; // development
   }
 
-  interface ConnectPacket extends InternetPacket, Request {
+  interface ConnectPacket extends NetworkPacket, Request {
     type: 'connect';
+    ephemeralKey: string;
+    addrs: MultiAddr[];
   }
-  interface ConnectResPacket extends InternetPacket, Response {
+  interface ConnectResPacket extends NetworkPacket, Response {
     type: 'connectRes';
-    accept: boolean;
-    method?: 'addr' | 'webrtc';
-    addr?: string;
+    accepted: boolean;
+    method?: 'myAddr' | 'yourAddr' | 'webrtc';
+
+    // for myAddr method
+    addrs?: MultiAddr[];
+
+    // for webrtc method's further connectSignal encryption
+    ephemeralKey?: string;
   }
-  interface ConnectSignalPacket extends InternetPacket {
+  interface ConnectSignalPacket extends NetworkPacket {
     type: 'connectSignal';
-    data?: any;
+    ephemeralKey: string;
+    encryptedSignal?: any;
   }
 
   interface JoinPacket extends Packet, Request {
     type: 'join';
-    roomName: string; // not hashed
+    roomName: string; // not hashed, can be kind of a passphrase
   }
   interface JoinResPacket extends Packet, Response {
     type: 'joinRes';
+    accepted: boolean;
     peers: PeerId[];
   }
 
   // ==========
 
-  class SimplePeer {
+  class SimpleRtcPeer {
   }
 }
 
+type Unpromise<T extends Promise<any>> = T extends Promise<infer U> ? U : never;

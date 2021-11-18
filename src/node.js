@@ -2,6 +2,14 @@ const repl = require('repl');
 const { create: createIpfsClient } = require('ipfs-http-client');
 
 const UnamedNetwork = require('./unamed-network');
+const debug = require('debug');
+
+debug.enable([
+  'unamedNetwork:*',
+  '-unamedNetwork:start',
+  '-unamedNetwork:packet:content',
+  '-unamedNetwork:addrConn',
+].join(',')); // for development
 
 async function main() {
   const ipfsClient = createIpfsClient({
