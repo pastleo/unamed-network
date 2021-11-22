@@ -4,6 +4,30 @@ import KBucket from 'k-bucket';
 import crypto from 'libp2p-crypto';
 
 declare module 'unamed-network' {
+  type UnamedNetworkEvents = {
+    'new-member': ({ peer: Peer, room: Room }) => void;
+    'new-known-service-addr': ({ addr: MultiAddr }) => void;
+  }
+
+  export default class UnamedNetwork extends EventEmitter<UnamedNetworkEvents> {
+    readonly ipfs: IPFS;
+    readonly nodeType: NodeType;
+    readonly idInfo: Awaited<ReturnType<IPFS['id']>>;
+    readonly rooms: Map<RoomNameHash, Room>;
+    readonly primaryRoomNameHash: RoomNameHash | null; // for kBucket's localNodeId, which determine this node's location in Kademlia DHT network
+    readonly peers: Map<PeerId, Peer>;
+    readonly kBucket: KBucket<KBucketContact>; // rooms without other peers should not be added
+
+    readonly knownServiceNodes: MultiAddr[];
+    readonly started: boolean;
+
+    private requestResolveRejects: Map<ReqId, [(payload: any) => void, (error: any) => void]>;
+
+    constructor(ipfs: IPFS);
+    start(knownServiceNodes: MultiAddr[]): Promise<void>;
+    join(roomName: string, makePrimary?: boolean): Promise<boolean>;
+  }
+
   type RoomNameHash = string;
   type RoomNameHashBuffer = Uint8Array;
   type PeerId = string;
@@ -34,10 +58,6 @@ declare module 'unamed-network' {
     vectorClock: number;
   }
 
-  type UnamedNetworkEvents = {
-    'new-member': ({ peer: Peer, room: Room }) => void;
-  }
-
   type Ephemeral = Awaited<ReturnType<typeof crypto.keys.generateEphemeralKeyPair>>;
   type Encrypter = Awaited<ReturnType<typeof crypto.aes.create>>;
   type Decrypter = Awaited<ReturnType<typeof crypto.aes.create>>;
@@ -48,24 +68,7 @@ declare module 'unamed-network' {
     decrypter: Decrypter;
   }
 
-  export default class UnamedNetwork extends EventEmitter<UnamedNetworkEvents> {
-    nodeType: NodeType;
-    ipfs: IPFS;
-    rooms: Map<RoomNameHash, Room>;
-    primaryRoomNameHash: RoomNameHash | null; // for kBucket's localNodeId, which determine this node's location in Kademlia DHT network
-    peers: Map<PeerId, Peer>; // connected
-    kBucket: KBucket<KBucketContact>; // known rooms, but rooms without other peers should not be added
-
-    private requestResolveRejects: Map<ReqId, [(payload: any) => void, (error: any) => void]>;
-    private started: boolean;
-
-    constructor(ipfs: IPFS);
-    start(knownServiceNodes: MultiAddr[]): Promise<void>;
-    join(roomName: string, makePrimary?: boolean): Promise<boolean>;
-  }
-
-  // Packets
-  // ==========
+  // Packets (just as memo)
 
   interface Packet { // abstract
     type: string;
@@ -144,7 +147,7 @@ declare module 'unamed-network' {
     members?: PeerId[];
   }
 
-  // ==========
+  // 3rd package that don't have typings:
 
   class SimpleRtcPeer {
   }

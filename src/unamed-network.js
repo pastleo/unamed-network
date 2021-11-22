@@ -1,7 +1,6 @@
 const { EventEmitter } = require('events');
 const KBucket = require('k-bucket');
 const debug = require('debug');
-//const { multiaddr } = require('multiaddr');
 const BufferUtils = require('uint8arrays');
 const SimplePeer = require('libp2p-webrtc-peer');
 const crypto = require('libp2p-crypto');
@@ -18,9 +17,6 @@ const K_BUCKET_OPTIONS_CLIENT_NODE = {
 const EPHEMERAL_ALG = 'P-256';
 const EPHEMERAL_STRETCHER_CIPHER_TYPE = 'AES-128';
 const EPHEMERAL_STRETCHER_HASH_TYPE = 'SHA1';
-const DEFAULT_KNOWN_SERVICE_NODES = [
-  '/ip4/127.0.0.1/tcp/4005/ws/p2p/12D3KooWMg1RMxFkAGGEW9RS66M4sCqz8BePeXMVwTPBjw4oBjR2'
-];
 
 const dbg = ns => debug(`unamedNetwork:${ns}`);
 const logger = {
@@ -48,9 +44,10 @@ class UnamedNetwork extends EventEmitter {
 
     this.requestResolveRejects = new Map();
     this.started = false;
+    this.knownServiceAddr = [];
   }
 
-  async start(knownServiceNodes = DEFAULT_KNOWN_SERVICE_NODES) {
+  async start(knownServiceAddr = []) {
     this.idInfo = await this.ipfs.id();
     this.addrs = this.idInfo.addresses.filter(
       addr => addr.protos().find(proto => ['ws', 'wss'].indexOf(proto.name) >= 0)
@@ -70,9 +67,12 @@ class UnamedNetwork extends EventEmitter {
       }
     });
 
-    this.knownServiceNodes = knownServiceNodes.filter(addr => addr.indexOf(this.idInfo.id) === -1);
+    if (knownServiceAddr.length <= 0) {
+      console.warn('start: no knownServiceAddr provided, this node might be lonely and single');
+    }
+    this.knownServiceAddr = knownServiceAddr.filter(addr => addr.indexOf(this.idInfo.id) === -1);
     await Promise.all(
-      shuffle(this.knownServiceNodes).slice(-3).map(addr => this.connectAddr([addr]))
+      shuffle(this.knownServiceAddr).slice(-3).map(addr => this.connectAddr([addr]))
     );
 
     if (this.nodeType === 'serviceNode') {
@@ -138,8 +138,9 @@ class UnamedNetwork extends EventEmitter {
 
     let joinIterCnt = 0;
     let pendingMembers = this.getRoomMember(room, ['pending']);
+    let connectedMembers = this.getRoomMember(room, ['connected']);
 
-    while (pendingMembers.length > 0) {
+    while (pendingMembers.length > 0 || connectedMembers.length > 0) {
       joinIterCnt++;
       logger.join(`[round #${joinIterCnt}] room join request completed, knowing pending members: [${pendingMembers.join(', ')}]`);
 
@@ -148,7 +149,7 @@ class UnamedNetwork extends EventEmitter {
         return this.connectPeerOnNetwork(routeToMember);
       }));
 
-      const connectedMembers = this.getRoomMember(room, ['connected']);
+      connectedMembers = this.getRoomMember(room, ['connected']);
       logger.join(`[round #${joinIterCnt}] room member connected, join and query more members (connected only members: [${connectedMembers.join(', ')}]`);
 
       await Promise.all(connectedMembers.map(memberPeerId => {
@@ -159,17 +160,13 @@ class UnamedNetwork extends EventEmitter {
       }));
 
       pendingMembers = this.getRoomMember(room, ['pending']);
+      connectedMembers = this.getRoomMember(room, ['connected']);
     }
 
     const members = this.getRoomMember(room);
     logger.join(`room is full-connected in ${joinIterCnt} rounds, members: [${members.join(', ')}]`);
 
     return true;
-
-    // TODO: room is found, then:
-    // * [x] connect to the replied peer
-    // * [x] send join request to the peer
-    // * [ ] using replied join packet to connect to all other members in the room (need to test)
   }
 
   // =================
@@ -346,6 +343,10 @@ class UnamedNetwork extends EventEmitter {
       pubsubPeers = await this.ipfs.pubsub.peers(pubsubTopic);
     }
 
+    if (this.knownServiceAddr.indexOf(addr) === -1) {
+      this.emit('new-known-service-addr', { addr });
+      this.knownServiceAddr.push(addr);
+    }
     this.setPeer(peerId, {
       addrs,
     });

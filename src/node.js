@@ -1,8 +1,10 @@
 const repl = require('repl');
 const { create: createIpfsClient } = require('ipfs-http-client');
+const debug = require('debug');
 
 const UnamedNetwork = require('./unamed-network');
-const debug = require('debug');
+
+const { DEV_KNOWN_SERVICE_ADDRS } = require('./dev-env');
 
 debug.enable([
   'unamedNetwork:*',
@@ -17,14 +19,19 @@ async function main() {
   })
 
   global.ipfsClient = ipfsClient;
-  console.log('global.ipfsClient started')
+  console.log('global.ipfsClient created')
 
-  const unamedNetwork = new UnamedNetwork(ipfsClient, 'serviceNode');
-  await unamedNetwork.start();
+  const unamedNetwork = new UnamedNetwork(ipfsClient);
   global.unamedNetwork = unamedNetwork;
-  console.log('global.unamedNetwork started');
+  console.log('global.unamedNetwork created');
 
-  repl.start({ prompt: '> ' });
+  await unamedNetwork.start(DEV_KNOWN_SERVICE_ADDRS);
+  console.log('unamedNetwork started');
+
+  setTimeout(() => {
+    console.log('unamedNetwork.idInfo.id:', unamedNetwork.idInfo.id);
+    repl.start({ prompt: '> ' });
+  }, 250);
 }
 
 main();
