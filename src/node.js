@@ -7,7 +7,7 @@ const debug = require('debug');
 debug.enable([
   'unamedNetwork:*',
   '-unamedNetwork:start',
-  '-unamedNetwork:packet:content',
+  '-unamedNetwork:packetContent:*',
   '-unamedNetwork:addrConn',
 ].join(',')); // for development
 

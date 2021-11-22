@@ -11,6 +11,7 @@ const { DEV_KNOWN_SERVICE_ADDRS } = require('./dev-env');
 debug.enable([
   'unamedNetwork:*',
   '-unamedNetwork:start',
+  '-unamedNetwork:packet:*',
 ].join(',')); // for development
 
 async function main() {

@@ -10,16 +10,18 @@ declare module 'unamed-network' {
   type MultiAddr = string;
   type ReqId = string;
   type NodeType = 'serviceNode' | 'clientNode';
+  type RoomMemberState = 'pending' | 'connected' | 'joined';
+  type PeerConnState = 'pending' | 'connected';
 
   interface Room {
     roomNameHash: RoomNameHash;
     joined: boolean;
     name?: string; // not hashed, only room member knows
-    peers: Set<PeerId>;
+    members: Map<PeerId, RoomMemberState>;
   }
   interface Peer {
     peerId: PeerId;
-    state: 'pending' | 'connected';
+    state: PeerConnState;
     addrs: MultiAddr[];
     nodeType: NodeType;
     roomNameHashes: RoomNameHash[];
@@ -33,12 +35,12 @@ declare module 'unamed-network' {
   }
 
   type UnamedNetworkEvents = {
-    'new-peer': (peer: Peer) => void;
+    'new-member': ({ peer: Peer, room: Room }) => void;
   }
 
-  type Ephemeral = Unpromise<ReturnType<typeof crypto.keys.generateEphemeralKeyPair>>;
-  type Encrypter = Unpromise<ReturnType<typeof crypto.aes.create>>;
-  type Decrypter = Unpromise<ReturnType<typeof crypto.aes.create>>;
+  type Ephemeral = Awaited<ReturnType<typeof crypto.keys.generateEphemeralKeyPair>>;
+  type Encrypter = Awaited<ReturnType<typeof crypto.aes.create>>;
+  type Decrypter = Awaited<ReturnType<typeof crypto.aes.create>>;
   interface Rtc {
     simplePeer: SimpleRtcPeer;
     ephemeral: Ephemeral;
@@ -56,6 +58,10 @@ declare module 'unamed-network' {
 
     private requestResolveRejects: Map<ReqId, [(payload: any) => void, (error: any) => void]>;
     private started: boolean;
+
+    constructor(ipfs: IPFS);
+    start(knownServiceNodes: MultiAddr[]): Promise<void>;
+    join(roomName: string, makePrimary?: boolean): Promise<boolean>;
   }
 
   // Packets
@@ -89,8 +95,6 @@ declare module 'unamed-network' {
     targetHash: string;
     fromPath: PeerId[];
     lastDistance: number;
-
-    roomName: string; // development
   }
 
   interface NetworkPacket extends Packet { // abstract
@@ -106,8 +110,6 @@ declare module 'unamed-network' {
   interface FindResPacket extends NetworkPacket, Response {
     type: 'findRes';
     found: boolean;
-
-    roomName: string; // development
   }
 
   interface ConnectPacket extends NetworkPacket, Request {
@@ -128,18 +130,18 @@ declare module 'unamed-network' {
   }
   interface ConnectSignalPacket extends NetworkPacket {
     type: 'connectSignal';
-    ephemeralKey: string;
     encryptedSignal?: any;
   }
 
   interface JoinPacket extends Packet, Request {
     type: 'join';
+    roomNameHash: RoomNameHash;
     roomName: string; // not hashed, can be kind of a passphrase
   }
   interface JoinResPacket extends Packet, Response {
     type: 'joinRes';
-    accepted: boolean;
-    peers: PeerId[];
+    ok: boolean;
+    members?: PeerId[];
   }
 
   // ==========
@@ -147,5 +149,3 @@ declare module 'unamed-network' {
   class SimpleRtcPeer {
   }
 }
-
-type Unpromise<T extends Promise<any>> = T extends Promise<infer U> ? U : never;
