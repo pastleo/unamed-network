@@ -5,8 +5,9 @@ import crypto from 'libp2p-crypto';
 
 declare module 'unamed-network' {
   type UnamedNetworkEvents = {
-    'new-member': ({ peer: Peer, room: Room }) => void;
+    'new-member': ({ member: Peer, room: Room }) => void;
     'new-known-service-addr': ({ addr: MultiAddr }) => void;
+    'room-message': ({ room: Room, fromMember: Peer, message: any }) => void;
   }
 
   export default class UnamedNetwork extends EventEmitter<UnamedNetworkEvents> {
@@ -22,10 +23,12 @@ declare module 'unamed-network' {
     readonly started: boolean;
 
     private requestResolveRejects: Map<ReqId, [(payload: any) => void, (error: any) => void]>;
+    private broadcastedMessages: Map<string, () => void>; // value is a fn to clearTimeout
 
     constructor(ipfs: IPFS);
     start(knownServiceNodes: MultiAddr[]): Promise<void>;
     join(roomName: string, makePrimary?: boolean): Promise<boolean>;
+    broadcast(roomName: string, message: any): void;
   }
 
   type RoomNameHash = string;
@@ -145,6 +148,13 @@ declare module 'unamed-network' {
     type: 'joinRes';
     ok: boolean;
     members?: PeerId[];
+  }
+
+  interface RoomMessagePacket extends Packet {
+    type: 'roomMessage';
+    roomNameHash: RoomNameHash;
+    author: PeerId;
+    message: any;
   }
 
   // 3rd package that don't have typings:

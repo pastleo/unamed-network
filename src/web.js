@@ -8,10 +8,13 @@ const UnamedNetwork = require('./unamed-network');
 
 const { DEV_KNOWN_SERVICE_ADDRS } = require('./dev-env');
 
+const log = debug('web.js');
+
 debug.enable([
   'unamedNetwork:*',
   '-unamedNetwork:start',
   '-unamedNetwork:packet:*',
+  'web.js',
 ].join(',')); // for development
 
 async function main() {
@@ -36,22 +39,31 @@ async function main() {
   });
 
   window.ipfs = ipfs;
-  console.log('window.ipfs created:', window.ipfs);
+  log('window.ipfs created:', window.ipfs);
 
-  const knownServiceAddr = JSON.parse(localStorage.getItem('unamedNetwork:knownServiceAddr') || 'null') || DEV_KNOWN_SERVICE_ADDRS;
+  //const knownServiceAddr = JSON.parse(localStorage.getItem('unamedNetwork:knownServiceAddr') || 'null') || DEV_KNOWN_SERVICE_ADDRS;
+  const knownServiceAddr = DEV_KNOWN_SERVICE_ADDRS; // for development
 
   const unamedNetwork = new UnamedNetwork(ipfs);
   window.unamedNetwork = unamedNetwork;
-  console.log('window.unamedNetwork created:', window.unamedNetwork);
+  log('window.unamedNetwork created:', window.unamedNetwork);
 
   unamedNetwork.addListener('new-known-service-addr', ({ addr }) => {
-    console.log('unamedNetwork [new-known-service-addr]', { addr });
+    log('unamedNetwork [new-known-service-addr]', { addr });
     knownServiceAddr.push(addr);
     localStorage.setItem('unamedNetwork:knownServiceAddr', JSON.stringify(knownServiceAddr));
   });
 
+  unamedNetwork.addListener('new-member', ({ room, member }) => {
+    log('unamedNetwork [new-member]', { room, member });
+  });
+
+  unamedNetwork.addListener('room-message', ({ room, fromMember, message }) => {
+    log('unamedNetwork [room-message]', { room, fromMember, message });
+  });
+
   await unamedNetwork.start(knownServiceAddr);
-  console.log('unamedNetwork started, unamedNetwork.idInfo.id:', unamedNetwork.idInfo.id);
+  log('unamedNetwork started, unamedNetwork.idInfo.id:', unamedNetwork.idInfo.id);
   document.getElementById('idInfo-id').textContent = unamedNetwork.idInfo.id;
 }
 

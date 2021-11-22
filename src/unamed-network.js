@@ -17,6 +17,7 @@ const K_BUCKET_OPTIONS_CLIENT_NODE = {
 const EPHEMERAL_ALG = 'P-256';
 const EPHEMERAL_STRETCHER_CIPHER_TYPE = 'AES-128';
 const EPHEMERAL_STRETCHER_HASH_TYPE = 'SHA1';
+const ROOM_MESSAGE_ID_CLEAR_TIMEOUT = 30000;
 
 const dbg = ns => debug(`unamedNetwork:${ns}`);
 const logger = {
@@ -42,9 +43,11 @@ class UnamedNetwork extends EventEmitter {
     this.peers = new Map();
     this.initKBucket(null);
 
-    this.requestResolveRejects = new Map();
     this.started = false;
     this.knownServiceAddr = [];
+
+    this.requestResolveRejects = new Map();
+    this.broadcastedMessages = new Map();
   }
 
   async start(knownServiceAddr = []) {
@@ -137,8 +140,8 @@ class UnamedNetwork extends EventEmitter {
     );
 
     let joinIterCnt = 0;
-    let pendingMembers = this.getRoomMember(room, ['pending']);
-    let connectedMembers = this.getRoomMember(room, ['connected']);
+    let pendingMembers = this.getRoomMembers(room, ['pending']);
+    let connectedMembers = this.getRoomMembers(room, ['connected']);
 
     while (pendingMembers.length > 0 || connectedMembers.length > 0) {
       joinIterCnt++;
@@ -149,7 +152,7 @@ class UnamedNetwork extends EventEmitter {
         return this.connectPeerOnNetwork(routeToMember);
       }));
 
-      connectedMembers = this.getRoomMember(room, ['connected']);
+      connectedMembers = this.getRoomMembers(room, ['connected']);
       logger.join(`[round #${joinIterCnt}] room member connected, join and query more members (connected only members: [${connectedMembers.join(', ')}]`);
 
       await Promise.all(connectedMembers.map(memberPeerId => {
@@ -159,14 +162,32 @@ class UnamedNetwork extends EventEmitter {
         );
       }));
 
-      pendingMembers = this.getRoomMember(room, ['pending']);
-      connectedMembers = this.getRoomMember(room, ['connected']);
+      pendingMembers = this.getRoomMembers(room, ['pending']);
+      connectedMembers = this.getRoomMembers(room, ['connected']);
     }
 
-    const members = this.getRoomMember(room);
+    const members = this.getRoomMembers(room);
     logger.join(`room is full-connected in ${joinIterCnt} rounds, members: [${members.join(', ')}]`);
 
     return true;
+  }
+
+  async broadcast(roomName, message) {
+    const roomNameHash = BufferUtils.toString(
+      await hash(BufferUtils.fromString(roomName)),
+      'base64',
+    );
+    const room = this.getJoinedRoom(roomNameHash);
+    if (!room) throw new Error(`room '${roomName}' not joined`);
+
+    const roomMessagePacket = this.createPacket({
+      type: 'roomMessage',
+      roomNameHash,
+      author: this.idInfo.id,
+      message,
+    });
+
+    this.spreadOutRoomMessage(room, roomMessagePacket);
   }
 
   // =================
@@ -245,7 +266,7 @@ class UnamedNetwork extends EventEmitter {
 
   addRoomToKBucket(room) {
     if (
-      this.getRoomMember(room).length <= 0 ||
+      this.getRoomMembers(room).length <= 0 ||
       room.roomNameHash === this.primaryRoomNameHash
     ) return;
 
@@ -284,7 +305,7 @@ class UnamedNetwork extends EventEmitter {
     return room;
   }
 
-  getRoomMember(room, inStates = CONNECTED_ROOM_MEMBER_STATES) {
+  getRoomMembers(room, inStates = CONNECTED_ROOM_MEMBER_STATES) {
     return [...room.members.entries()].filter(
       ([_peerId, state]) => inStates.indexOf(state) >= 0
     ).map(
@@ -320,7 +341,7 @@ class UnamedNetwork extends EventEmitter {
 
     joinedPeers.forEach(peerId => {
       this.emit('new-member', {
-        peer: this.peers.get(peerId),
+        member: this.peers.get(peerId),
         room,
       });
     });
@@ -333,6 +354,7 @@ class UnamedNetwork extends EventEmitter {
     logger.addrConn(`connectAddr: to '${peerId}' via '${addr}'`);
 
     await this.ipfs.swarm.connect(addr);
+    logger.addrConn(`connectAddr: 2 to '${peerId}' via '${addr}'`);
 
     const pubsubTopic = pubsubLinkTopic(peerId);
     await this.ipfs.pubsub.subscribe(pubsubTopic); // TODO: if this prototype can work, we should use link/rpc from libp2p
@@ -469,6 +491,8 @@ class UnamedNetwork extends EventEmitter {
         return this.handleJoinPacket(from, packet);
       case 'joinRes':
         return this.handleResponsePacket(from, packet);
+      case 'roomMessage':
+        return this.handleRoomMessagePacket(from, packet);
     }
   }
 
@@ -558,12 +582,29 @@ class UnamedNetwork extends EventEmitter {
     const joinResPacket = this.createPacket({
       type: 'joinRes',
       ok: true,
-      members: this.getRoomMember(room, ['joined']),
+      members: this.getRoomMembers(room, ['joined']),
     });
     this.respond(packet, joinResPacket);
     this.sendPacket(peer, joinResPacket);
 
     return true;
+  }
+
+  handleRoomMessagePacket(from, packet) {
+    const room = this.getJoinedRoom(packet.roomNameHash);
+    if (!room) throw new Error(`handleRoomMessagePacket: room not found using nameHash: ${packet.roomNameHash}`);
+    if (room.members.get(from) !== 'joined') throw new Error(`handleRoomMessagePacket: peer '${from}' attempt to send room message without join`);
+    if (packet.author === this.idInfo.id) return;
+    if (room.members.get(packet.author) !== 'joined') throw new Error(`handleRoomMessagePacket: peer (author) '${from}' attempt to send room message without join`);
+    if (this.broadcastedMessages.has(packet.packetId)) return true;
+    
+    this.emit('room-message', {
+      room,
+      fromMember: this.peers.get(packet.author),
+      message: packet.message,
+    });
+
+    this.spreadOutRoomMessage(room, packet, from);
   }
 
   createPacket(content) {
@@ -826,7 +867,7 @@ class UnamedNetwork extends EventEmitter {
     }
 
     const peerId = sample(
-      this.getRoomMember(room).filter(
+      this.getRoomMembers(room).filter(
         id => packet.fromPath.indexOf(id) === -1
       )
     );
@@ -860,6 +901,28 @@ class UnamedNetwork extends EventEmitter {
 
     this.respond(packet, notFoundPacket);
     this.sendNetworkPacket(notFoundPacket);
+  }
+
+  spreadOutRoomMessage(room, packet, from = '') {
+    const deleteRecord = () => {
+      this.broadcastedMessages.delete(packet.packetId);
+    };
+    const timer = setTimeout(deleteRecord, ROOM_MESSAGE_ID_CLEAR_TIMEOUT);
+    this.broadcastedMessages.set(packet.packetId, () => {
+      deleteRecord();
+      clearTimeout(timer);
+    });
+
+    const members = this.getRoomMembers(room, ['joined']);
+
+    members.filter(
+      peerId => peerId !== from
+    ).forEach(peerId => {
+      this.sendPacket(
+        this.getConnectedPeer(peerId),
+        packet,
+      );
+    });
   }
 
   logIfStarted(ns, ...message) {

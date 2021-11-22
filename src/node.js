@@ -6,11 +6,14 @@ const UnamedNetwork = require('./unamed-network');
 
 const { DEV_KNOWN_SERVICE_ADDRS } = require('./dev-env');
 
+const log = debug('node.js');
+
 debug.enable([
   'unamedNetwork:*',
   '-unamedNetwork:start',
   '-unamedNetwork:packetContent:*',
   '-unamedNetwork:addrConn',
+  'node.js',
 ].join(',')); // for development
 
 async function main() {
@@ -19,17 +22,25 @@ async function main() {
   })
 
   global.ipfsClient = ipfsClient;
-  console.log('global.ipfsClient created')
+  log('global.ipfsClient created')
 
   const unamedNetwork = new UnamedNetwork(ipfsClient);
   global.unamedNetwork = unamedNetwork;
-  console.log('global.unamedNetwork created');
+  log('global.unamedNetwork created');
 
   await unamedNetwork.start(DEV_KNOWN_SERVICE_ADDRS);
-  console.log('unamedNetwork started');
+  log('unamedNetwork started');
+
+  unamedNetwork.addListener('new-member', ({ room, member }) => {
+    log('unamedNetwork [new-member]', { room, member });
+  });
+
+  unamedNetwork.addListener('room-message', ({ room, fromMember, message }) => {
+    log('unamedNetwork [room-message]', { room, fromMember, message });
+  });
 
   setTimeout(() => {
-    console.log('unamedNetwork.idInfo.id:', unamedNetwork.idInfo.id);
+    log('unamedNetwork.idInfo.id:', unamedNetwork.idInfo.id);
     repl.start({ prompt: '> ' });
   }, 250);
 }
