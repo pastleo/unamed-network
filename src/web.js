@@ -3,11 +3,14 @@ const WS = require('libp2p-websockets');
 const filters = require('libp2p-websockets/src/filters');
 const transportKey = WS.prototype[Symbol.toStringTag];
 
+const { DEV_KNOWN_SERVICE_ADDRS } = require('./dev-env');
+
 async function main() {
   const ipfs = await IPFS.create({
     config: {
       // If you want to connect to the public bootstrap nodes, remove the next line
       Bootstrap: [
+        ...DEV_KNOWN_SERVICE_ADDRS,
       ]
     },
     libp2p: {

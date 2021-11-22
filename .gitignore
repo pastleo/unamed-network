@@ -1,3 +1,10 @@
+dev-ipfs-nodes/dev-1/*
+!dev-ipfs-nodes/dev-1/config
+dev-ipfs-nodes/dev-2/*
+!dev-ipfs-nodes/dev-2/config
+dev-ipfs-nodes/dev-3/*
+!dev-ipfs-nodes/dev-3/config
+
 # Logs
 logs
 *.log
