@@ -1,5 +1,5 @@
 import { EventEmitter } from 'tsee';
-import { IPFS } from 'ipfs-core';
+import { create as createIPFS, IPFS } from 'ipfs-core';
 import KBucket from 'k-bucket';
 import crypto from 'libp2p-crypto';
 
@@ -30,6 +30,9 @@ declare module 'unamed-network' {
     join(roomName: string, makePrimary?: boolean): Promise<boolean>;
     broadcast(roomName: string, message: any): void;
   }
+
+  export { createIPFS }; // only on webLib
+  export const devConfig: any; // only on webLib
 
   type RoomNameHash = string;
   type RoomNameHashBuffer = Uint8Array;

@@ -5,9 +5,30 @@
   "type": "module",
   "module": "lib/unamed-network.js",
   "types": "index.d.ts",
+  "targets": {
+    "module": false,
+    "types": false,
+    "webLib": {
+      "source": "src/webLib.js",
+      "context": "browser",
+      "includeNodeModules": true,
+      "isLibrary": true,
+      "optimize": false,
+      "outputFormat": "commonjs",
+      "sourceMap": false,
+      "distDir": "webLib"
+    }
+  },
+  "browserslist": "Firefox ESR",
+  "exports": {
+    ".": {
+      "browser": "./webLib/webLib.js"
+    }
+  },
   "scripts": {
-    "clean": "rm -rf ./dist ./.cache ./.parcel-cache",
+    "clean": "rm -rf ./.cache ./.parcel-cache",
     "web": "npm run clean && parcel serve index.html -p 8888 --no-hmr",
+    "build": "npm run clean && parcel build",
     "start": "node lib/node.js"
   },
   "repository": {
