@@ -2,12 +2,13 @@
   "name": "unamed-network",
   "version": "0.0.1",
   "description": "IPFS and WebRTC p2p network",
-  "main": "index.js",
+  "type": "module",
+  "module": "lib/unamed-network.js",
+  "types": "index.d.ts",
   "scripts": {
     "clean": "rm -rf ./dist ./.cache ./.parcel-cache",
-    "build": "parcel build index.html --no-scope-hoist",
-    "serve": "parcel serve index.html -p 8888 --no-hmr",
-    "start": "npm run clean && npm run serve"
+    "web": "npm run clean && parcel serve index.html -p 8888 --no-hmr",
+    "start": "node lib/node.js"
   },
   "repository": {
     "type": "git",
