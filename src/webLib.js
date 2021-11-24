@@ -1,14 +1,17 @@
 import UnamedNetwork from '../lib/unamed-network.js';
+
 import { create as createIPFS } from 'ipfs-core';
+import debug from 'debug';
 
 import WS from 'libp2p-websockets';
 import filters from 'libp2p-websockets/src/filters';
 
-export default UnamedNetwork;
-export { createIPFS };
-export const devConfig = {
+const WEB_DEV_IPFS_OPTIONS = {
   config: {
     Bootstrap: []
+  },
+  preload: {
+    addresses: []
   },
   libp2p: {
     config: {
@@ -22,3 +25,6 @@ export const devConfig = {
     }
   }
 }
+
+export default UnamedNetwork;
+export { createIPFS, WEB_DEV_IPFS_OPTIONS, debug };
