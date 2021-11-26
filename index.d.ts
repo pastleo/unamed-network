@@ -7,9 +7,9 @@ import debug from 'debug';
 declare module 'unamed-network' {
 
   type UnamedNetworkEvents = {
-    'new-member': (event: { member: Peer, room: Room }) => void,
-    'member-left': (event: { member: Peer, room: Room }) => void,
     'new-known-service-addr': (event: { addr: MultiAddr }) => void,
+    'new-member': (event: { memberPeer: Peer, room: Room }) => void,
+    'member-left': (event: { memberPeer: Peer, room: Room }) => void,
     'room-message': (event: { room: Room, fromMember: Peer, message: any }) => void,
   }
 
