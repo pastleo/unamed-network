@@ -7,8 +7,9 @@ import debug from 'debug';
 declare module 'unamed-network' {
 
   type UnamedNetworkEvents = {
-    'new-member': (event: { member: Peer, room: Room }) => void,
     'new-known-service-addr': (event: { addr: MultiAddr }) => void,
+    'new-member': (event: { memberPeer: Peer, room: Room }) => void,
+    'member-left': (event: { memberPeer: Peer, room: Room }) => void,
     'room-message': (event: { room: Room, fromMember: Peer, message: any }) => void,
   }
 
@@ -29,12 +30,16 @@ declare module 'unamed-network' {
 
     private requestResolveRejects: Map<ReqId, [(payload: any) => void, (error: any) => void]>;
     private broadcastedMessages: Map<string, () => void>; // value is a fn to clearTimeout
+    private pubsubPollLostInterval: ReturnType<typeof setInterval>;
 
     constructor(ipfs: IPFS, config?: Config);
     start(knownServiceNodes: MultiAddr[]): Promise<void>;
 
     /** @returns if room has other peers */
     join(roomName: string, makePrimary?: boolean): Promise<boolean>;
+
+    // TODO: implement, cannot leave primary room, must join another primary first
+    // leave(roomName: string)
 
     broadcast(roomName: string, message: any): void;
   }
@@ -61,7 +66,7 @@ declare module 'unamed-network' {
   type ReqId = string;
   type NodeType = 'serviceNode' | 'clientNode';
   type RoomMemberState = 'pending' | 'connected' | 'joined';
-  type PeerConnState = 'pending' | 'connected';
+  type PeerConnState = 'pending' | 'connected' | 'closing';
 
   interface Room {
     roomNameHash: RoomNameHash;
