@@ -2,12 +2,14 @@ import { EventEmitter } from 'tsee';
 import { create as createIPFS, IPFS } from 'ipfs-core';
 import KBucket from 'k-bucket';
 import crypto from 'libp2p-crypto';
+import debug from 'debug';
 
 declare module 'unamed-network' {
+
   type UnamedNetworkEvents = {
-    'new-member': ({ member: Peer, room: Room }) => void;
-    'new-known-service-addr': ({ addr: MultiAddr }) => void;
-    'room-message': ({ room: Room, fromMember: Peer, message: any }) => void;
+    'new-member': (event: { member: Peer, room: Room }) => void,
+    'new-known-service-addr': (event: { addr: MultiAddr }) => void,
+    'room-message': (event: { room: Room, fromMember: Peer, message: any }) => void,
   }
 
   export default class UnamedNetwork extends EventEmitter<UnamedNetworkEvents> {
@@ -21,18 +23,36 @@ declare module 'unamed-network' {
 
     readonly knownServiceNodes: MultiAddr[];
     readonly started: boolean;
+    readonly config: Config;
+    readonly iceServers: RTCIceServers;
+    readonly providing?: Providing;
 
     private requestResolveRejects: Map<ReqId, [(payload: any) => void, (error: any) => void]>;
     private broadcastedMessages: Map<string, () => void>; // value is a fn to clearTimeout
 
-    constructor(ipfs: IPFS);
+    constructor(ipfs: IPFS, config?: Config);
     start(knownServiceNodes: MultiAddr[]): Promise<void>;
+
+    /** @returns if room has other peers */
     join(roomName: string, makePrimary?: boolean): Promise<boolean>;
+
     broadcast(roomName: string, message: any): void;
   }
 
-  export { createIPFS }; // only on webLib
-  export const devConfig: any; // only on webLib
+  /** WARNING: only available from webLib */
+  export const WEB_DEV_IPFS_OPTIONS: any;
+  /** WARNING: only available from webLib */
+  export { createIPFS, debug };
+
+  type RTCIceServers = ConstructorParameters<typeof RTCPeerConnection>[0]['iceServers']
+
+  interface Config {
+    iceServers?: RTCIceServers;
+    providing?: {
+      iceServers?: RTCIceServers,
+      gateway?: boolean | string,
+    };
+  }
 
   type RoomNameHash = string;
   type RoomNameHashBuffer = Uint8Array;
@@ -74,6 +94,11 @@ declare module 'unamed-network' {
     decrypter: Decrypter;
   }
 
+  interface Providing {
+    iceServers?: RTCIceServers;
+    gateway?: string,
+  }
+
   // Packets (just as memo)
 
   interface Packet { // abstract
@@ -92,11 +117,13 @@ declare module 'unamed-network' {
     type: 'ping';
     addrs: MultiAddr[];
     roomNameHashes: RoomNameHash[];
+    providing?: Providing;
   }
   interface PongPacket extends Packet, Response {
     type: 'pong';
     addrs: MultiAddr[];
     roomNameHashes: RoomNameHash[];
+    providing?: Providing;
   }
 
   interface FindPacket extends Packet, Request {

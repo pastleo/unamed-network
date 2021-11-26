@@ -5,7 +5,7 @@ dev-ipfs-nodes/dev-2/*
 dev-ipfs-nodes/dev-3/*
 !dev-ipfs-nodes/dev-3/config
 
-webLib/webLib.js
+env.js
 
 # Logs
 logs
