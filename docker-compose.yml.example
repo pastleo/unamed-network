@@ -1,0 +1,64 @@
+version: "3.9"
+volumes:
+  export:
+  data:
+
+  #export-1:
+  #data-1:
+  # and export-2, export-3...
+
+services:
+  unamed-network:
+    build: .
+    image: unamed-network:0.0.1
+    depends_on: [ipfs]
+    environment:
+      IPFS_API: http://ipfs:5001
+      PROVIDING_ICE_SERVERS: ''
+      PROVIDING_GATEWAY: 'true'
+      KNOWN_SERVICE_ADDRS: ''
+  ipfs:
+    image: ipfs/go-ipfs:master-2021-11-23-c00065c
+    ports:
+      - "4001:4001"
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:4005:4005"
+    volumes:
+      - type: volume
+        source: export
+        target: /export
+      - type: volume
+        source: data
+        target: /data/ipfs
+      - type: bind
+        source: .
+        target: /tmp
+    command: ["daemon", "--migrate=true", "--agent-version-suffix=docker", "--enable-pubsub-experiment"]
+
+  #unamed-network-1:
+    #build: .
+    #image: unamed-network:0.0.1
+    #depends_on: [ipfs-1]
+    #environment:
+      #IPFS_API: http://ipfs-1:5001
+      #PROVIDING_ICE_SERVERS: ''
+      #PROVIDING_GATEWAY: 'true'
+      #KNOWN_SERVICE_ADDRS: ''
+  #ipfs-1:
+    #image: ipfs/go-ipfs:master-2021-11-23-c00065c
+    #ports:
+      #- "4001:4001"
+      #- "127.0.0.1:4101:8080"
+      #- "127.0.0.1:4201:4005"
+    #volumes:
+      #- type: volume
+        #source: export-1
+        #target: /export
+      #- type: volume
+        #source: data-1
+        #target: /data/ipfs
+      #- type: bind
+        #source: .
+        #target: /tmp
+    #command: ["daemon", "--migrate=true", "--agent-version-suffix=docker", "--enable-pubsub-experiment"]
+    # and unamed-network-2, ipfs-2...

@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/bin/sh
+
+if [ "$NO_PATCH_IPFS_CORE_NODE_MODULE" ]; then
+  exit 0;
+fi
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 

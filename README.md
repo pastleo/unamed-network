@@ -48,3 +48,20 @@ An Experiment that forms p2p [Kademlia DHT network](https://en.wikipedia.org/wik
 4. `npm run web` and open [http://localhost:8888](http://localhost:8888) in your browser
 
 Then use console (for both browser and nodejs) entering `await unamedNetwork.join('some-room')` to start testing, you can also start multiple `serviceNode` like `dev-2`, `dev-3` and browsers joining the same network
+
+## Docker
+
+```bash
+cp docker-compose.yml.example docker-compose.yml
+docker-compose up
+docker-compose exec ipfs sh
+cp /data/ipfs/config /tmp/docker-ipfs-config # copy config out from docker volume
+
+vim docker-ipfs-config # edit like `config`
+# add into Addresses.Swarm: "/ip4/0.0.0.0/tcp/4005/ws"
+# add API.HTTPHeaders.Access-Control-Allow-Origin: ["*"] # this can make gateway to send CORS headers
+# add into Addresses.Announce if has: ["/dns4/ipfs.node.example/tcp/443/wss"]
+
+docker-compose exec ipfs sh
+cat /tmp/config.docker > /data/ipfs/config # write back to docker volume
+```

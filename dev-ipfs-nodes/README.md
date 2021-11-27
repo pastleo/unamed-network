@@ -16,10 +16,6 @@
       "Access-Control-Allow-Origin": ["*"]
     }
   },
-  "Swarm": {
-    "DisableRelay": false,
-    "EnableRelayHop": true,
-  }
 }
 ```
 
