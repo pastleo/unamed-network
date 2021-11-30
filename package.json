@@ -21,9 +21,8 @@
   },
   "browserslist": "Firefox ESR",
   "exports": {
-    ".": {
-      "browser": "./webLib/webLib.js"
-    }
+    ".": "./lib/unamed-network.js",
+    "./webLib": "./webLib/webLib.js"
   },
   "scripts": {
     "postinstall": "./scripts/patch-node-modules.sh",
