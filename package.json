@@ -56,6 +56,8 @@
     "k-bucket": "^5.1.0",
     "libp2p-crypto": "^0.20.0",
     "libp2p-webrtc-peer": "^10.0.1",
+    "multiaddr": "^10.0.1",
+    "multiaddr-to-uri": "^8.0.0",
     "multiformats": "^9.4.10",
     "uint8arrays": "^3.0.0",
     "ws": "^8.3.0"

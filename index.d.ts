@@ -1,28 +1,29 @@
-import { EventEmitter } from 'tsee';
-import { create as createIPFS, IPFS } from 'ipfs-core';
-import KBucket from 'k-bucket';
-import crypto from 'libp2p-crypto';
-import debug from 'debug';
+import type { EventEmitter } from 'tsee';
+import type WebSocket from 'isomorphic-ws';
+import type { WebSocket as ServerWebSocket } from 'ws';
+import type KBucket from 'k-bucket';
+import type crypto from 'libp2p-crypto';
+import type debug from 'debug';
 
 declare module 'unamed-network' {
 
   type UnamedNetworkEvents = {
-    'new-known-service-addr': (event: { addr: MultiAddr }) => void,
+    'new-known-service-addr': (event: { addr: MultiAddrStr }) => void,
     'new-member': (event: { memberPeer: Peer, room: Room }) => void,
     'member-left': (event: { memberPeer: Peer, room: Room }) => void,
     'room-message': (event: { room: Room, fromMember: Peer, message: any }) => void,
   }
 
   export default class UnamedNetwork extends EventEmitter<UnamedNetworkEvents> {
-    readonly ipfs: IPFS;
+    readonly id: string;
+    readonly addrs: MultiAddrStr[];
     readonly nodeType: NodeType;
-    readonly idInfo: Awaited<ReturnType<IPFS['id']>>;
     readonly rooms: Map<RoomNameHash, Room>;
     readonly primaryRoomNameHash: RoomNameHash | null; // for kBucket's localNodeId, which determine this node's location in Kademlia DHT network
     readonly peers: Map<PeerId, Peer>;
     readonly kBucket: KBucket<KBucketContact>; // rooms without other peers should not be added
 
-    readonly knownServiceNodes: MultiAddr[];
+    readonly knownServiceAddrs: MultiAddrStr[];
     readonly started: boolean;
     readonly config: Config;
     readonly iceServers: RTCIceServers;
@@ -32,8 +33,10 @@ declare module 'unamed-network' {
     private broadcastedMessages: Map<string, () => void>; // value is a fn to clearTimeout
     private pubsubPollLostInterval: ReturnType<typeof setInterval>;
 
-    constructor(ipfs: IPFS, config?: Config);
-    start(knownServiceNodes: MultiAddr[]): Promise<void>;
+    constructor(config?: Config);
+    start(knownServiceAddrs: MultiAddrStr[], myAddrs?: MultiAddrStr[]): Promise<void>;
+
+    receiveAddrConn(ws: ServerWebSocket);
 
     /** @returns if room has other peers */
     join(roomName: string, makePrimary?: boolean): Promise<boolean>;
@@ -44,28 +47,21 @@ declare module 'unamed-network' {
     broadcast(roomName: string, message: any): void;
   }
 
-  /** WARNING: only available from webLib */
-  export const WEB_DEV_IPFS_OPTIONS: any;
-  /** WARNING: only available from webLib */
-  export { createIPFS, debug };
-
   type RTCIceServers = ConstructorParameters<typeof RTCPeerConnection>[0]['iceServers']
 
   interface Config {
+    id?: string;
     iceServers?: RTCIceServers;
-    providing?: {
-      iceServers?: RTCIceServers,
-      gateway?: boolean | string,
-    };
+    providing?: Providing;
   }
 
   type RoomNameHash = string;
   type RoomNameHashBuffer = Uint8Array;
   type PeerId = string;
-  type MultiAddr = string;
+  type MultiAddrStr = string;
   type ReqId = string;
   type NodeType = 'serviceNode' | 'clientNode';
-  type RoomMemberState = 'pending' | 'connected' | 'joined';
+  type RoomMemberState = 'pending' | 'connected' | 'joined' | 'failed';
   type PeerConnState = 'pending' | 'connected' | 'closing';
 
   interface Room {
@@ -77,11 +73,15 @@ declare module 'unamed-network' {
   interface Peer {
     peerId: PeerId;
     state: PeerConnState;
-    addrs: MultiAddr[];
+    addrs: MultiAddrStr[];
     nodeType: NodeType;
     roomNameHashes: RoomNameHash[];
     connectedResolves: ((peer: Peer) => void)[];
+    closingAndRejects: ((peer: Peer) => void)[];
+    ws?: WebSocket;
     rtc?: Rtc;
+
+    pending?: Pick<Peer, 'ws' | 'connectedResolves'>;
   }
   interface KBucketContact {
     id: RoomNameHashBuffer;
@@ -101,7 +101,6 @@ declare module 'unamed-network' {
 
   interface Providing {
     iceServers?: RTCIceServers;
-    gateway?: string,
   }
 
   // Packets (just as memo)
@@ -120,13 +119,14 @@ declare module 'unamed-network' {
 
   interface PingPacket extends Packet, Request {
     type: 'ping';
-    addrs: MultiAddr[];
+    id: string;
+    addrs: MultiAddrStr[];
     roomNameHashes: RoomNameHash[];
     providing?: Providing;
   }
   interface PongPacket extends Packet, Response {
     type: 'pong';
-    addrs: MultiAddr[];
+    addrs: MultiAddrStr[];
     roomNameHashes: RoomNameHash[];
     providing?: Providing;
   }
@@ -156,7 +156,7 @@ declare module 'unamed-network' {
   interface ConnectPacket extends NetworkPacket, Request {
     type: 'connect';
     ephemeralKey: string;
-    addrs: MultiAddr[];
+    addrs: MultiAddrStr[];
   }
   interface ConnectResPacket extends NetworkPacket, Response {
     type: 'connectRes';
@@ -164,7 +164,7 @@ declare module 'unamed-network' {
     method?: 'myAddr' | 'yourAddr' | 'webrtc';
 
     // for myAddr method
-    addrs?: MultiAddr[];
+    addrs?: MultiAddrStr[];
 
     // for webrtc method's further connectSignal encryption
     ephemeralKey?: string;
