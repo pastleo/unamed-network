@@ -3,22 +3,16 @@ volumes:
   export:
   data:
 
-  #export-1:
-  #data-1:
-  # and export-2, export-3...
-
 services:
-  unamed-network:
-    build: .
-    image: unamed-network:0.0.1
-    depends_on: [ipfs]
-    environment:
-      IPFS_API: http://ipfs:5001
-      PROVIDING_ICE_SERVERS: ''
-      PROVIDING_GATEWAY: 'true'
-      KNOWN_SERVICE_ADDRS: ''
   ipfs:
+    # generate and get peer identity first:
+    # docker-compose up -d ipfs
+    # docker-compose logs
+    # ... peer identity: 12D3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    # replace the following 12D3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0
+    # /ip4/127.0.0.1/tcp/3001/ws should be changed to /dns4/node0.example.com/tcp/443/wss
     image: ipfs/go-ipfs:master-2021-11-23-c00065c
+    #restart: always
     ports:
       - "4001:4001"
       - "127.0.0.1:8080:8080"
@@ -30,35 +24,40 @@ services:
       - type: volume
         source: data
         target: /data/ipfs
-      - type: bind
-        source: .
-        target: /tmp
-    command: ["daemon", "--migrate=true", "--agent-version-suffix=docker", "--enable-pubsub-experiment"]
+      #- type: bind
+        #source: .
+        #target: /tmp
+
+  unamed-network:
+    build: .
+    image: unamed-network:0.0.1
+    depends_on: [ipfs]
+    #restart: always
+    environment:
+      KNOWN_SERVICE_ADDRS: '/ip4/127.0.0.1/tcp/3001/ws/p2p/12D3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0'
+      SERVICE_NODE_IPFS_API: http://ipfs:5001
+      SERVICE_NODE_ID: '12D3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0'
+      PROVIDING_ICE_SERVERS: ''
+      SERVICE_NODE_ADDRS: '/ip4/127.0.0.1/tcp/3001/ws/p2p/12D3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0'
+    ports:
+      - "127.0.0.1:3001:3001"
+
+  #ipfs-tmp:
+    ## generate peer identity:
+    ## docker-compose run --rm ipfs-tmp
+    ## ... peer identity: 12D3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    ## ^C to stop and replace 12D3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx1
+    ## /ip4/127.0.0.1/tcp/3002/ws should be changed to /dns4/node1.example.com/tcp/443/wss
+    #image: ipfs/go-ipfs:master-2021-11-23-c00065c
 
   #unamed-network-1:
     #build: .
     #image: unamed-network:0.0.1
-    #depends_on: [ipfs-1]
+    ##restart: always
     #environment:
-      #IPFS_API: http://ipfs-1:5001
+      #KNOWN_SERVICE_ADDRS: '/ip4/127.0.0.1/tcp/3001/ws/p2p/12D3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0,/ip4/127.0.0.1/tcp/3002/ws/p2p/12D3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx1'
+      #SERVICE_NODE_ID: '12D3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx1'
       #PROVIDING_ICE_SERVERS: ''
-      #PROVIDING_GATEWAY: 'true'
-      #KNOWN_SERVICE_ADDRS: ''
-  #ipfs-1:
-    #image: ipfs/go-ipfs:master-2021-11-23-c00065c
+      #SERVICE_NODE_ADDRS: '/ip4/127.0.0.1/tcp/3002/ws/p2p/12D3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx1'
     #ports:
-      #- "4001:4001"
-      #- "127.0.0.1:4101:8080"
-      #- "127.0.0.1:4201:4005"
-    #volumes:
-      #- type: volume
-        #source: export-1
-        #target: /export
-      #- type: volume
-        #source: data-1
-        #target: /data/ipfs
-      #- type: bind
-        #source: .
-        #target: /tmp
-    #command: ["daemon", "--migrate=true", "--agent-version-suffix=docker", "--enable-pubsub-experiment"]
-    # and unamed-network-2, ipfs-2...
+      #- "127.0.0.1:3002:3001"

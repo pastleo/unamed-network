@@ -25,7 +25,6 @@
     "./webLib": "./webLib/webLib.js"
   },
   "scripts": {
-    "postinstall": "./scripts/patch-node-modules.sh",
     "clean": "rm -rf dist .cache .parcel-cache",
     "web": "npm run clean && parcel serve index.html -p 8888 --no-hmr",
     "build": "npm run clean && parcel build",
