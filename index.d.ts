@@ -1,6 +1,5 @@
 import type { EventEmitter } from 'tsee';
 import type WebSocket from 'isomorphic-ws';
-import type { WebSocket as ServerWebSocket } from 'ws';
 import type KBucket from 'k-bucket';
 import type crypto from 'libp2p-crypto';
 import type debug from 'debug';
@@ -36,7 +35,7 @@ declare module 'unamed-network' {
     constructor(config?: Config);
     start(knownServiceAddrs: MultiAddrStr[], myAddrs?: MultiAddrStr[]): Promise<void>;
 
-    receiveAddrConn(ws: ServerWebSocket);
+    receiveAddrConn(ws: WebSocket);
 
     /** @returns if room has other peers */
     join(roomName: string, makePrimary?: boolean): Promise<boolean>;
