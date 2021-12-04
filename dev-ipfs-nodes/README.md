@@ -33,10 +33,11 @@ git checkout dev-ipfs-nodes/dev-1
 ipfs id
 
 # start deamon
-IPFS_PATH=./dev-ipfs-nodes/dev-1 ipfs daemon --enable-pubsub-experiment
+IPFS_PATH=./dev-ipfs-nodes/dev-1 ipfs daemon
 
 # start unamed-network node
-IPFS_API=http://localhost:5011 npm start
+. ./dev-ipfs-nodes/dev-1/env
+npm start
 ```
 
 ### `dev-2`
@@ -50,11 +51,12 @@ ipfs init
 git checkout dev-ipfs-nodes/dev-2
 ipfs id
 
-# start daemon
-IPFS_PATH=./dev-ipfs-nodes/dev-2 ipfs daemon --enable-pubsub-experiment
+# start daemon (not required for now)
+IPFS_PATH=./dev-ipfs-nodes/dev-2 ipfs daemon
 
 # start unamed-network node
-IPFS_API=http://localhost:5012 npm start
+. ./dev-ipfs-nodes/dev-2/env
+npm start
 ```
 
 ### `dev-3`
@@ -68,9 +70,10 @@ ipfs init
 git checkout dev-ipfs-nodes/dev-3
 ipfs id
 
-# start deamon
-IPFS_PATH=./dev-ipfs-nodes/dev-3 ipfs daemon --enable-pubsub-experiment
+# start daemon (not required for now)
+IPFS_PATH=./dev-ipfs-nodes/dev-3 ipfs daemon
 
 # start unamed-network node
-IPFS_API=http://localhost:5013 npm start
+. ./dev-ipfs-nodes/dev-3/env
+npm start
 ```
