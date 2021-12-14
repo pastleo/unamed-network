@@ -7,10 +7,34 @@
     <title>UnamedNetwork Dev</title>
 
     <script type="module" src="./lib/web.js" defer></script>
+    <style>
+      table, td {
+        border: 1px solid #333;
+      }
+    </style>
   </head>
   <body>
     <h1>UnamedNetwork Dev</h1>
-    <p>Open Console in Web Developer tools to test</p>
-    <p>ipfs.id().id / unamedNetwork.idInfo.id: <span id='unamedNetwork-id'></span></p>
+    <p>Use widgets below or open console of devTool to test</p>
+    <p>unamedNetwork.id: <span id='unamedNetwork-id'></span></p>
+    <p>
+      <input id="join-room-name" placeholder="Room name">
+      <button id="join">Join</button>
+    </p>
+    <table>
+      <thead>
+        <tr><td>RoomName (RoomNameHash)</td><td>Peers</td></tr>
+      </thead>
+      <tbody id="room-peers">
+        <tr><td colspan="2">No Rooms</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <input id="broadcast-room" placeholder="Room name to broadcast">
+      <input id="broadcast-message" placeholder="Message">
+      <button id="broadcast">Broadcast to primary room</button>
+      <div id="message-box">
+      </div>
+    </p>
   </body>
 </html>
