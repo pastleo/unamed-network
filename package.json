@@ -22,8 +22,8 @@
   "homepage": "https://github.com/pastleo/unamed-network",
   "peerDependencies": {
     "debug": "^4.3.2",
-    "ipfs-core": "^0.12.1",
-    "ipfs-http-client": "^54.0.1",
+    "ipfs-core": "^0.13.0",
+    "ipfs-http-client": "^55.0.0",
     "libp2p-websockets": "^0.16.2"
   },
   "devDependencies": {
