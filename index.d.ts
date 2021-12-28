@@ -91,11 +91,16 @@ declare module 'unamed-network' {
   type Ephemeral = Awaited<ReturnType<typeof crypto.keys.generateEphemeralKeyPair>>;
   type Encrypter = Awaited<ReturnType<typeof crypto.aes.create>>;
   type Decrypter = Awaited<ReturnType<typeof crypto.aes.create>>;
+  type Chunk = Uint8Array;
   interface Rtc {
     simplePeer: SimpleRtcPeer;
     ephemeral: Ephemeral;
     encrypter: Encrypter;
     decrypter: Decrypter;
+    sendingChunks: Chunk[];
+    sendingResolves: (() => void)[];
+    chunksSender?: () => void;
+    chunksReceived: Chunk[];
   }
 
   interface Providing {
