@@ -14,7 +14,7 @@ declare module 'unamed-network' {
   }
 
   export default class UnamedNetwork extends EventEmitter<UnamedNetworkEvents> {
-    readonly id: string;
+    readonly id: PeerId;
     readonly addrs: MultiAddrStr[];
     readonly nodeType: NodeType;
     readonly rooms: Map<RoomNameHash, Room>;
@@ -43,13 +43,13 @@ declare module 'unamed-network' {
     // TODO: implement, cannot leave primary room, must join another primary first
     // leave(roomName: string)
 
-    broadcast(roomName: string, message: any): void;
+    broadcast(roomName: string, message: any, recipients?: PeerId): void;
   }
 
   type RTCIceServers = ConstructorParameters<typeof RTCPeerConnection>[0]['iceServers']
 
   interface Config {
-    id?: string;
+    id?: PeerId;
     iceServers?: RTCIceServers;
     providing?: Providing;
   }
@@ -194,6 +194,7 @@ declare module 'unamed-network' {
     roomNameHash: RoomNameHash;
     author: PeerId;
     message: any;
+    recipients: []; // empty means everyone
   }
 
   // 3rd package that don't have typings:
