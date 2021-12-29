@@ -43,7 +43,7 @@ declare module 'unamed-network' {
     // TODO: implement, cannot leave primary room, must join another primary first
     // leave(roomName: string)
 
-    broadcast(roomName: string, message: any, recipients?: PeerId): void;
+    broadcast(roomName: string, message: any, recipients?: PeerId[]): void;
   }
 
   type RTCIceServers = ConstructorParameters<typeof RTCPeerConnection>[0]['iceServers']
