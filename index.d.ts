@@ -97,9 +97,6 @@ declare module 'unamed-network' {
     ephemeral: Ephemeral;
     encrypter: Encrypter;
     decrypter: Decrypter;
-    sendingChunks: Chunk[];
-    sendingResolves: (() => void)[];
-    chunksSender?: () => void;
     chunksReceived: Chunk[];
   }
 
