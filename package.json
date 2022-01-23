@@ -8,7 +8,13 @@
   "scripts": {
     "clean": "rm -rf dist .cache .parcel-cache",
     "web": "npm run clean && parcel serve index.html -p 8888 --no-hmr",
+    "build-web": "npm run clean && parcel build index.html --public-url ./",
     "start": "node lib/node.js"
+  },
+  "targets": {
+    "module": false,
+    "main": false,
+    "types": false
   },
   "repository": {
     "type": "git",

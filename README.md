@@ -13,6 +13,10 @@ An Experiment that forms p2p [Kademlia DHT network](https://en.wikipedia.org/wik
 * broadcast messages in the room
 * listen to memeber join / leave and other peer's broadcasted messages
 
+### DEMO site
+
+https://static.pastleo.me/unamed-network-202201-demo/
+
 ## Design
 
 * There are 2 type of node in the network, namely `serviceNode` and `clientNode`
