@@ -40,6 +40,8 @@ declare module 'unamed-network' {
     /** @returns if room has other peers */
     join(roomName: string, makePrimary?: boolean): Promise<boolean>;
 
+    getRoom(roomName: string): Promise<Room>;
+
     // TODO: implement, cannot leave primary room, must join another primary first
     // leave(roomName: string)
 
