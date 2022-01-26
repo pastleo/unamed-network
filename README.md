@@ -29,7 +29,7 @@ https://static.pastleo.me/unamed-network-202201-demo/
 * to join a room, a node send out a find room packet (RPC between nodes) containing `hash(room.name)` to search for a room (or more precisely, a room member node), this packet can hop through many nodes, each node route the packet based on DHT
   * after finding room, the packet is responded with route of each peerId it traveled
   * with route of each peerId, a connect request packet is sent to the room member, so do WebRTC signal packets between the two
-* `WIP: not implemented yet` to prevent a node with too many connection, [k-bucket](https://www.npmjs.com/package/k-bucket) will tell if there are redundant connections to other rooms
+* to prevent a node with too many connection, [k-bucket](https://www.npmjs.com/package/k-bucket) will tell if there are redundant connections to other rooms `Not properly tested yet`
 
 ## Roadmap
 
@@ -41,7 +41,8 @@ https://static.pastleo.me/unamed-network-202201-demo/
   * [x] `clientNode` -> `clientNode` (WebRTC)
 * [x] provided as a library (for [unamed-world](https://github.com/pastleo/unamed-world))
 * [x] detect peer connection lost and leaving
-* [ ] use `k-bucket` to close redundant connections to other rooms, manage number of connections (especially for `clientNode`)
+* [x] use `k-bucket` to close redundant connections to other rooms not joined
+* [ ] manage number of connections (especially for `clientNode`)
 * [ ] retry on finding room
 * [ ] other improvements to be add here
 

@@ -1,3 +1,5 @@
+export IPFS_PATH=./dev-ipfs-nodes/dev-1
+
 export SERVICE_NODE_PORT=3001
 export SERVICE_NODE_IPFS_API=http://localhost:5011
 export SERVICE_NODE_ADDRS=/ip4/127.0.0.1/tcp/3001/ws/p2p/12D3KooWMg1RMxFkAGGEW9RS66M4sCqz8BePeXMVwTPBjw4oBjR2
