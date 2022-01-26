@@ -45,6 +45,7 @@
       "/ip6/::/udp/4001/quic"
     ],
     "Announce": [],
+    "AppendAnnounce": [],
     "NoAnnounce": [],
     "API": "/ip4/127.0.0.1/tcp/5012",
     "Gateway": "/ip4/127.0.0.1/tcp/8082"
@@ -101,9 +102,8 @@
     "AddrFilters": null,
     "DisableBandwidthMetrics": false,
     "DisableNatPortMap": false,
-    "DisableRelay": false,
-    "EnableRelayHop": true,
-    "EnableAutoRelay": false,
+    "RelayClient": {},
+    "RelayService": {},
     "Transports": {
       "Network": {},
       "Security": {},
@@ -141,7 +141,6 @@
   "Experimental": {
     "FilestoreEnabled": false,
     "UrlstoreEnabled": false,
-    "ShardingEnabled": false,
     "GraphsyncEnabled": false,
     "Libp2pStreamMounting": false,
     "P2pHttpProxy": false,
@@ -153,5 +152,6 @@
   },
   "Pinning": {
     "RemoteServices": {}
-  }
+  },
+  "Internal": {}
 }

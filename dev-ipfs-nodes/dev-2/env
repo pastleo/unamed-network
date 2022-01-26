@@ -1,3 +1,5 @@
+export IPFS_PATH=./dev-ipfs-nodes/dev-2
+
 export SERVICE_NODE_PORT=3002
 export SERVICE_NODE_ID=12D3KooWHajH8D6sfgydW1S9QuboeViFUKArn4vqXEJuT1dVZdT9
 export SERVICE_NODE_ADDRS=/ip4/127.0.0.1/tcp/3002/ws/p2p/12D3KooWHajH8D6sfgydW1S9QuboeViFUKArn4vqXEJuT1dVZdT9
