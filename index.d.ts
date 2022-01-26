@@ -69,6 +69,7 @@ declare module 'unamed-network' {
     joined: boolean;
     name?: string; // not hashed, only room member knows
     members: Map<PeerId, RoomMemberState>;
+    outOfKBucket?: boolean;
   }
   interface Peer {
     peerId: PeerId;
@@ -82,7 +83,8 @@ declare module 'unamed-network' {
     rtc?: Rtc;
 
     pending?: Pick<Peer, 'ws' | 'connectedResolves'>;
-    keepAlivePingTimer?: ReturnType<typeof setTimeout>;
+    routineTimer?: ReturnType<typeof setTimeout>;
+    ping?: number;
   }
   interface KBucketContact {
     id: RoomNameHashBuffer;
