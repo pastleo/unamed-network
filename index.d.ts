@@ -38,12 +38,11 @@ declare module 'unamed-network' {
     receiveAddrConn(ws: WebSocket);
 
     /** @returns if room has other peers */
-    join(roomName: string, makePrimary?: boolean): Promise<boolean>;
+    join(roomName: string, makePrimary?: boolean): Promise<Room>;
 
     getRoom(roomName: string): Promise<Room>;
 
-    // TODO: implement, cannot leave primary room, must join another primary first
-    // leave(roomName: string)
+    leave(roomName: string): Promise<void>;
 
     broadcast(roomName: string, message: any, recipients?: PeerId[]): void;
   }
@@ -62,7 +61,7 @@ declare module 'unamed-network' {
   type MultiAddrStr = string;
   type ReqId = string;
   type NodeType = 'serviceNode' | 'clientNode';
-  type RoomMemberState = 'pending' | 'connected' | 'joined' | 'failed';
+  type RoomMemberState = 'pending' | 'connected' | 'joined' | 'failed' | 'left-connected';
   type PeerConnState = 'pending' | 'connected' | 'closing';
 
   interface Room {
@@ -83,6 +82,7 @@ declare module 'unamed-network' {
     rtc?: Rtc;
 
     pending?: Pick<Peer, 'ws' | 'connectedResolves'>;
+    keepAlivePingTimer?: ReturnType<typeof setTimeout>;
   }
   interface KBucketContact {
     id: RoomNameHashBuffer;

@@ -21,10 +21,17 @@
     <p>
       <input id="join-room-name" placeholder="Room name">
       <button id="join">Join</button>
+      <input id="make-primary" type="checkbox">Make Primary</input>
     </p>
     <table>
       <thead>
-        <tr><td>RoomName (RoomNameHash)</td><td>Peers</td></tr>
+        <tr>
+          <td>
+            RoomName (RoomNameHash)
+            <button id="refresh-table">Refresh Table</button>
+          </td>
+          <td>Peers</td>
+        </tr>
       </thead>
       <tbody id="room-peers">
         <tr><td colspan="2">No Rooms</td></tr>
